@@ -1,0 +1,21 @@
+# PREVIEW ONLY. Creates a new service; does not change existing V3 deployment.
+services:
+  - type: web
+    name: nabla-arena-preview
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements-cloud.txt
+    startCommand: python server.py
+    healthCheckPath: /api/health
+    autoDeployTrigger: off
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: NABLA_REQUIRE_PERSISTENT_STORAGE
+        value: '1'
+      - key: NABLA_ISOLATE_MATH
+        value: '1'
+      - key: NABLA_MAX_CALC_SECONDS
+        value: '12'
+      - key: DATABASE_URL
+        sync: false

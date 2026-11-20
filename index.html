@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>ナブラ演算子ゲーム｜NABLA ARENA 第4段階</title>
+<style>
+:root{font-family:'Hiragino Kaku Gothic ProN','Yu Gothic','Meiryo',sans-serif;color:#141414;background:white;font-synthesis:none}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;background:white}
+button{font:inherit;cursor:pointer;color:inherit;background:#fff;border:1px solid #333;border-radius:5px;white-space:nowrap}
+button:hover{background:#f3f3f3}button:focus-visible{outline:3px solid #555;outline-offset:2px}
+.game{height:100vh;height:100dvh;max-height:100dvh;display:grid;grid-template-rows:94px minmax(0,1fr) 165px;gap:11px;padding:12px 20px 15px;overflow:hidden}
+.header{display:grid;grid-template-columns:1fr auto 1fr;gap:16px;align-items:center;border-bottom:1px solid #999;padding:2px 2px 10px}
+.logo{min-width:0}.logo h1{font-weight:650;letter-spacing:1px;font-size:clamp(17px,1.9vw,27px);margin:0 0 4px}.logo small{font-family:Georgia,serif;letter-spacing:2.5px;font-size:13px;color:#555}
+.deck-area{display:flex;align-items:center;gap:13px;justify-content:center}.pile{width:46px;height:56px;position:relative;flex-shrink:0}.pile>span{position:absolute;width:39px;height:52px;background:white;border:1.5px solid black;border-radius:4px;display:flex;align-items:center;justify-content:center;font-family:Georgia,serif;font-size:24px}.pile>span:nth-child(1){left:7px;top:4px}.pile>span:nth-child(2){left:4px;top:2px}.pile>span:nth-child(3){left:0;top:0}
+.deck-text{font-size:14px;line-height:1.7}.deck-text strong{font-size:17px}.timer{border:1px solid #b2b2b2;border-radius:4px;padding:2px 7px;font-size:12px;color:#444;display:block;width:max-content}
+.top-actions{display:flex;justify-content:flex-end;gap:8px}.top-actions button{padding:11px 14px;font-weight:600;font-size:13px}
+.arena{display:grid;grid-template-columns:minmax(0,35fr) minmax(0,30fr) minmax(0,35fr);gap:12px;min-height:0}
+.field,.log{border:1.5px solid #202020;border-radius:7px;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;background:white}
+.field.current{border:3px solid #111}.field h2,.log h2{font-size:16px;font-weight:600;margin:0}.field-head{min-height:59px;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 14px 11px;border-bottom:1px solid #ddd}.field-title{display:flex;gap:9px;align-items:center;flex-wrap:wrap}.turn{display:inline-block;font-size:11px;color:#fff;background:#141414;border-radius:3px;padding:4px 6px;font-weight:700}.meta{font-size:12px;color:#4a4a4a;flex-shrink:0}
+.field-main{position:relative;display:flex;align-items:center;min-height:0;flex:1;padding:8px 33px;background:#fff;cursor:pointer}
+.field-main:hover{background:#fbfbfb}.field-main.picked{background:#eeeeee}.field-main.picked::after{content:'場を選択中';position:absolute;bottom:9px;right:35px;font-size:11px;color:#444}
+.basis-scroll{width:100%;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;scrollbar-color:#aaa #f7f7f7}
+.basis-rows{display:flex;flex-direction:column;gap:14px;width:max-content;min-width:100%;justify-content:center}
+.basis-row{height:108px;display:flex;gap:9px;align-items:center;white-space:nowrap}
+.basis{height:97px;min-width:79px;max-width:215px;width:max-content;padding:9px 12px;border:1.6px solid #333;border-radius:6px;background:#fff;display:flex;flex-direction:column;gap:8px;align-items:stretch;cursor:pointer;transition:background .25s ease,opacity .35s ease}
+.basis:hover{background:#f6f6f6}.basis.selected{border:3px solid #000;background:#ebebeb;padding:7.6px 10px}.basis .no{font-size:11px;color:#555;text-align:left}.formula{font-family:'Cambria Math','Times New Roman',Georgia,serif;line-height:1.1;font-size:24px;white-space:nowrap;text-align:center;padding:0 4px;overflow-x:auto;scrollbar-width:thin}
+.formula.small{font-size:17px}.basis .formula{padding:0 6px}.scroll-arrow{position:absolute;top:50%;transform:translateY(-50%);width:25px;height:50px;border:1px solid #ccc;background:#fafafa;font-size:22px;font-family:Georgia,serif;opacity:.85;padding:0;z-index:2}.scroll-arrow.left{left:4px}.scroll-arrow.right{right:4px}
+.log-head{min-height:59px;display:flex;justify-content:space-between;align-items:center;padding:11px 12px;border-bottom:1px solid #ddd;gap:8px}.log-head button{font-size:11px;padding:7px 9px}
+.log-body{padding:15px;overflow:auto;min-height:0;flex:1;font-size:13px;line-height:1.8;scrollbar-width:thin}.log-label{color:#666;font-size:11px;letter-spacing:.04em;margin-bottom:5px}.event-title{font-weight:700;font-size:13px;border-bottom:1px solid #ddd;padding-bottom:8px;margin-bottom:9px}.event-text{line-height:1.9}.math-line{font-family:'Cambria Math','Times New Roman',Georgia,serif;font-size:20px;white-space:nowrap;max-width:100%;overflow-x:auto;line-height:1.65;padding:6px 3px}.math-line.compact{font-size:17px}.log-explain{color:#444;font-size:12px}.log-controls{border-top:1px solid #ddd;padding:10px 12px;display:flex;gap:8px}.log-controls button{flex:1;padding:11px 8px;font-size:13px}.log-controls .primary{background:#151515;color:#fff;font-weight:700}.log-controls .primary:hover{background:#444}.log-controls button:disabled{opacity:.45;cursor:not-allowed}
+.history-entry{padding:9px 0;border-bottom:1px solid #e3e3e3}.history-entry strong{font-size:12px}
+.hand{border-top:1px solid #aaa;min-height:0;padding-top:11px;display:grid;grid-template-rows:27px minmax(0,1fr);gap:6px}.hand-title{display:flex;align-items:center;justify-content:space-between;font-size:15px;font-weight:600}.hand-note{font-weight:400;color:#777;font-size:11px}.hand-inner{display:flex;align-items:center;gap:8px;min-width:0}.hand-arrow{height:85px;width:29px;flex:none;background:#fafafa;font-size:20px;color:#555}.hand-list{display:flex;align-items:center;gap:9px;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;min-width:0;width:100%;height:100%;padding:2px 2px 8px}
+.hand-card{height:96px;min-width:74px;max-width:153px;width:max-content;padding:8px 13px;flex:none;position:relative;border:1.6px solid #222;border-radius:6px;background:white;display:flex;align-items:center;justify-content:center;font-family:'Cambria Math','Times New Roman',Georgia,serif;font-size:23px;white-space:nowrap;user-select:none}.hand-card:hover{background:#f7f7f7}.hand-card.chosen{border:3px solid black;background:#eaeaea;padding:7px 11px}.hand-card .num{position:absolute;top:4px;left:5px;background:#fff;color:#111;font-family:'Hiragino Kaku Gothic ProN',sans-serif;font-size:15px;font-weight:bold;width:26px;height:26px;border:1.6px solid black;border-radius:50%;display:flex;align-items:center;justify-content:center;z-index:1}.hand-card.chosen .card-symbol{margin-top:16px}
+.limit{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.05;vertical-align:middle;font-family:'Times New Roman',Georgia,serif}.limit .op{font-size:23px;letter-spacing:-1px}.limit .sub{font-size:10.5px;margin-top:2px;font-style:italic}.hand-card .limit .op{font-size:24px}
+.hover-help{position:fixed;background:#fff;border:1px solid black;border-radius:4px;font-size:12px;max-width:280px;padding:8px 11px;z-index:30;pointer-events:none;box-shadow:0 3px 8px #0002;display:none}
+.modal-shade{position:fixed;inset:0;background:#0005;display:none;align-items:center;justify-content:center;z-index:40;padding:20px}.modal-shade.open{display:flex}.modal{background:white;color:#111;border:2px solid #111;border-radius:8px;width:min(95vw,620px);max-height:82vh;overflow:auto;padding:22px;box-shadow:0 12px 48px #0003}.modal h2{margin-top:0;font-size:19px}.modal p{line-height:1.75}.modal button{padding:10px 15px}.modal-row{display:flex;gap:9px;justify-content:flex-end;margin-top:16px}.modal table{width:100%;border-collapse:collapse;font-size:13px}.modal td{border-bottom:1px solid #ddd;padding:6px 3px}
+.preview-mark{position:fixed;right:20px;bottom:7px;color:#888;font-size:10px;pointer-events:none}
+@media(max-width:1050px){.game{padding:9px 12px 13px;gap:8px;grid-template-rows:78px minmax(0,1fr) 145px}.logo h1{font-size:19px}.logo small{font-size:10px}.top-actions button{padding:8px 9px}.arena{gap:7px}.field-head,.log-head{padding:8px;min-height:49px}.field h2,.log h2{font-size:13px}.basis{height:85px;min-width:67px;padding:7px 8px}.basis-row{height:98px}.basis .formula{font-size:20px}.hand-card{height:82px}.hand-arrow{height:74px}.log-body{padding:9px}}
+@media(max-width:760px){.game{height:auto;max-height:none;min-height:100dvh;overflow:visible;grid-template-rows:auto auto auto}.header{grid-template-columns:1fr auto;gap:7px}.deck-area{grid-column:1 / -1;grid-row:2;justify-content:flex-start;padding:5px 0}.top-actions{grid-column:2;grid-row:1}.arena{grid-template-columns:1fr;grid-template-rows:270px 300px 270px}.field.self{grid-row:1}.log{grid-row:2}.field.opponent{grid-row:3}.hand{min-height:155px}.preview-mark{display:none}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+
+.hidden{display:none!important}
+.home{position:fixed;inset:0;z-index:21;background:#fff;display:flex;align-items:center;justify-content:center;padding:24px}
+.home-panel{width:min(95vw,930px);border:1.8px solid #222;border-radius:10px;padding:34px;text-align:center}
+.home-panel h1{font-size:clamp(24px,3vw,39px);margin:6px 0 8px}
+.home-panel .subtitle{font-family:Georgia,serif;letter-spacing:4px;font-size:15px;margin:0 0 24px;color:#555}
+.home-panel .mode-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:20px 0}
+.home-panel .mode-grid button{min-height:104px;font-size:19px;font-weight:600;white-space:normal;padding:12px}
+.home-panel button:disabled{color:#888;background:#f6f6f6;border-color:#bbb;cursor:not-allowed}
+.home-panel .muted{color:#686868;font-size:12px;line-height:1.6}
+.name-controls{display:flex;gap:18px;justify-content:center;flex-wrap:wrap;margin:18px 0}
+.name-controls label{display:flex;align-items:center;gap:8px;font-size:13px}
+.name-controls input{padding:10px;border:1px solid #888;border-radius:5px;font-size:15px;max-width:175px}
+.handoff{position:fixed;inset:0;z-index:30;background:#fff;display:flex;align-items:center;justify-content:center;text-align:center;padding:30px}
+.handoff-inner{border:2px solid #222;border-radius:10px;width:min(92vw,620px);padding:42px 32px}
+.handoff-inner h2{font-size:27px}.handoff-inner p{color:#444;white-space:pre-line;line-height:1.9}
+.handoff-inner button{background:#1a1a1a;color:white;font-weight:bold;padding:13px 42px;margin-top:18px}
+.msg{position:absolute;bottom:4px;left:22px;font-size:11px;color:#555;max-width:72vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.msg[data-kind=error]{color:#a00}
+.mini-stack{display:flex;flex-direction:column;font-family:inherit;align-items:center;gap:3px;line-height:1.05;font-size:12px}
+.mini-stack>span{font-size:19px}
+.basis .formula{font-size:30px;min-height:36px;display:flex;align-items:center;justify-content:center}
+.basis{height:112px;min-width:91px;max-width:255px;gap:10px}
+.basis-row{height:121px}
+.hand-card{min-width:86px;height:109px;font-size:30px;padding:8px 17px}
+.hand-card .limit .op{font-size:27px}
+.hand-card .limit .sub{font-size:12px}
+.game{grid-template-rows:94px minmax(0,1fr) 183px}
+.field-main{overflow:hidden}
+.basis math{font-size:1em}.log-body math{font-size:1.15em;max-width:100%}
+.log-body .math-line{min-height:32px}
+.log-body .math-line math{white-space:nowrap}
+.log-body p{margin:5px 0 10px}
+.card-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
+.card-list-item{display:flex;align-items:center;gap:12px;padding:6px;border-bottom:1px solid #ddd}
+.card-list-item>span:first-child{min-width:65px;display:flex;justify-content:center;font:20px Georgia,serif}
+.menu-options,.branch-buttons{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.menu-options button,.branch-buttons button{white-space:normal}
+.result-text{font-size:24px;text-align:center}
+#passBtn{padding:10px 12px;font-size:12px;border:1px solid #555}
+.reduce-motion *{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+@media(max-width:1050px){.basis{height:95px;min-width:75px}.basis-row{height:104px}.basis .formula{font-size:25px}.hand-card{height:90px;font-size:24px;min-width:72px}.game{grid-template-rows:78px minmax(0,1fr) 153px}}
+@media(max-width:760px){.game{grid-template-rows:auto auto auto}.home-panel .mode-grid{grid-template-columns:1fr}.home-panel .mode-grid button{min-height:60px}.home{align-items:flex-start;overflow:auto}.home-panel{padding:20px}}
+.field .turn{display:none}.field.current .turn{display:inline-block}
+.online-lobby{position:fixed;inset:0;z-index:22;background:#fff;display:flex;justify-content:center;align-items:center;padding:24px}
+.online-lobby-inner{width:min(94vw,660px);border:2px solid #222;border-radius:12px;padding:26px 32px;text-align:center}
+.online-lobby-inner p{color:#555;line-height:1.7}
+.room-code{font-size:43px;font-weight:700;letter-spacing:8px;margin:14px}
+#inviteLink{width:100%;padding:12px;border:1px solid #aaa;border-radius:5px;font-size:14px}
+.cpu-thinking{position:fixed;inset:0;z-index:25;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.82)}
+.cpu-thinking-box{border:2px solid #222;background:#fff;border-radius:8px;padding:28px 36px;text-align:center;max-width:420px}
+.cpu-thinking-box h2{font-size:22px;margin:12px 0}.cpu-thinking-box p{font-size:13px;color:#555}
+.cpu-spinner{width:26px;height:26px;border:3px solid #ddd;border-top-color:#111;border-radius:50%;margin:0 auto;animation:cpu-spin 1s linear infinite}
+@keyframes cpu-spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<section class="home" id="home">
+  <div class="home-panel">
+    <h1>ナブラ演算子ゲーム</h1><div class="subtitle">NABLA ARENA</div>
+    <p>21種類・78枚のカードで、相手の基底を消して勝利を目指す。</p>
+    <div class="name-controls"><label>プレイヤー1 <input id="name1" maxlength="24" placeholder="プレイヤー1"></label><label>プレイヤー2 <input id="name2" maxlength="24" placeholder="プレイヤー2"></label></div>
+    <div class="mode-grid">
+      <button id="startCPU" type="button">CPU対戦<small class="muted">初級・中級・上級</small></button>
+      <button id="startLocal" type="button">ローカル対戦</button>
+      <button type="button" id="startOnline">オンライン対戦<small class="muted">2人用ルーム・招待URL</small></button>
+    </div>
+    <button type="button" id="rulesHome" style="padding:12px 24px">ルール・カード一覧</button>
+    <p class="muted">第6段階の公開準備用プレビュー版です。正式公開前の検証が必要です。</p>
+  </div>
+</section>
+<div id="game" class="game hidden">
+  <header class="header">
+    <div class="logo"><h1>ナブラ演算子ゲーム</h1><small>NABLA ARENA</small></div>
+    <div class="deck-area"><div class="pile" aria-label="山札のアイコン"><span></span><span></span><span>∇</span></div><div class="deck-text">山札 <strong>残り <span id="deckNum">64</span> 枚</strong><span class="timer" id="turnNo">1手目</span></div></div>
+    <div class="top-actions"><button id="menuBtn">メニュー</button></div>
+  </header>
+  <main class="arena">
+    <section class="field self current" aria-label="自分の場" id="selfField">
+      <div class="field-head"><div class="field-title"><h2 id="selfName">自分</h2><span class="turn">操作中</span></div><span class="meta" id="selfCount">3次元</span></div>
+      <div class="field-main" data-field="self"><button aria-label="自分の基底を左にスクロール" class="scroll-arrow left" data-scroll="self" data-direction="-1">‹</button><div class="basis-scroll" id="selfScroll"><div class="basis-rows" id="selfRows"></div></div><button aria-label="自分の基底を右にスクロール" class="scroll-arrow right" data-scroll="self" data-direction="1">›</button></div>
+    </section>
+    <section class="log" aria-label="計算ログ">
+      <div class="log-head"><h2>計算ログ</h2><button id="historyBtn">全履歴を表示</button></div>
+      <div class="log-body" id="logBody"><div class="log-label">直前の操作</div><p>まだ行動履歴がありません。</p></div>
+      <div class="log-controls"><button id="cancelBtn">キャンセル (Esc)</button><button class="primary" id="executeBtn">実行 (Enter)</button></div>
+    </section>
+    <section class="field opponent" aria-label="相手の場" id="oppField">
+      <div class="field-head"><div class="field-title"><h2 id="oppName">相手</h2><span class="turn">操作中</span></div><span class="meta"><span id="oppCount">3次元</span>　｜　<span id="oppHandCount">手札 7枚</span></span></div>
+      <div class="field-main" data-field="opp"><button aria-label="相手の基底を左にスクロール" class="scroll-arrow left" data-scroll="opp" data-direction="-1">‹</button><div class="basis-scroll" id="oppScroll"><div class="basis-rows" id="oppRows"></div></div><button aria-label="相手の基底を右にスクロール" class="scroll-arrow right" data-scroll="opp" data-direction="1">›</button></div>
+    </section>
+  </main>
+  <section class="hand" aria-label="自分の手札">
+    <div class="hand-title"><span>手札（<span id="handCount">7</span>枚）　<button type="button" id="passBtn">パス</button></span><span class="hand-note">クリックで選択・ドラッグで並べ替え</span></div>
+    <div class="hand-inner"><button class="hand-arrow" data-hand-move="-1" aria-label="手札を左にスクロール">‹</button><div class="hand-list" id="handList"></div><button class="hand-arrow" data-hand-move="1" aria-label="手札を右にスクロール">›</button></div>
+  </section>
+  <div class="msg" id="msg" aria-live="polite"></div>
+</div>
+<section class="online-lobby hidden" id="onlineLobby">
+  <div class="online-lobby-inner">
+    <h2>オンライン対戦ルーム</h2>
+    <p id="lobbyStatus">参加者を待っています。</p>
+    <div class="room-code" id="roomCode">------</div>
+    <p>招待URLを相手に送信してください。ルームには2人まで参加できます。</p>
+    <input readonly id="inviteLink" aria-label="招待URL" />
+    <div class="modal-row"><button id="copyInvite">招待URLをコピー</button><button id="leaveLobby">ホームに戻る</button></div>
+  </div>
+</section>
+<section class="cpu-thinking hidden" id="cpuThinking" aria-live="polite"><div class="cpu-thinking-box"><div class="cpu-spinner" aria-hidden="true"></div><h2>CPU 思考中</h2><p>候補手を数学エンジンで検証しています。</p></div></section>
+<section class="handoff hidden" id="handoff"><div class="handoff-inner"><h2 id="handoffTitle">手番交代</h2><p id="handoffDetail">次のプレイヤーが準備してください。</p><button type="button" id="readyBtn">準備完了</button></div></section>
+<div class="modal-shade" id="modalShade" role="dialog" aria-modal="true"><div class="modal"><h2 id="modalTitle"></h2><div id="modalText" class="modal-text"></div><div class="modal-row"><button id="closeModal">閉じる</button></div></div></div>
+<script src="/app.js"></script>
+</body></html>
