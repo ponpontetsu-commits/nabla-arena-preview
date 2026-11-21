@@ -1,0 +1,47 @@
+
+name: NABLA ARENA revision build (feature branch only)
+
+on:
+  push:
+    branches: [nabla-arena-update]
+    paths:
+      - 'nabla_upgrade.py'
+      - 'nabla_cpu2.py'
+      - 'nabla_practice.py'
+      - 'nabla_steps.py'
+      - 'nabla_upgraderules.py'
+      - 'nabla_upgrade_ui.js'
+      - 'nabla_upgrade.css'
+      - 'test_*.py'
+      - '.github/workflows/nabla-upgrade.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Apply upgrade (all anchors checked first)
+        run: python nabla_upgrade.py
+      - name: Syntax checks
+        run: python -m compileall -q .
+      - name: JavaScript syntax checks
+        run: |
+          node --check app.js
+          node --check nabla_upgrade_ui.js
+      - name: Unit tests
+        run: python -m unittest test_independent test_nabla_revision -v
+      - name: Commit validated changes (never push main)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cards.py cpu.py nabla_game.py online_rooms.py server.py index.html app.js nabla_math.py
+          git diff --staged --quiet || git commit -m "Apply NABLA ARENA tested revision"
+          git push origin HEAD:nabla-arena-update
