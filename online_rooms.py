@@ -91,6 +91,10 @@ class OnlineRooms:
         self.store = store
         self.clock = clock or time.time
         self.lock = threading.RLock()
+        if os.environ.get('NABLA_INVALIDATE_OLD_ROOMS')=='1':
+            from nabla_upgraderules import invalidate_old_rooms
+            invalidate_old_rooms(self.store)
+        # NABLA-REVISION-2026-11
 
     @staticmethod
     def fail(message, status='error'):
@@ -233,7 +237,7 @@ class OnlineRooms:
             self.store.save(room)
             return {'ok': True, 'state': self._view(room, seat, now)}
 
-    def action(self, code, token, action, revision):
+    def action(self, code, token, action, revision, game_id=None):
         with self.lock:
             now = self.clock()
             room, seat = self._authenticated(code, token, now)
@@ -249,7 +253,7 @@ class OnlineRooms:
                 return self.fail('操作形式が不正です。', 'input_error')
             if room['game']['current'] != seat:
                 return self.fail('相手の手番です。', 'not_your_turn')
-            if room['game']['revision'] != revision:
+            if room['game'].get('game_id') != game_id or room['game']['revision'] != revision:
                 self.store.save(room)
                 return {'ok':False,'status':'stale','message':'古い盤面です。','state':self._view(room,seat,now)}
             remaining = max(0, room['deadline'] - now)
@@ -270,6 +274,24 @@ class OnlineRooms:
             return {'ok': result['status'] in ('ok','foul'), 'status':result['status'],
                     'message':result['reason'],'branch_options':result.get('branch_options',[]),
                     'event':result.get('event'), 'state':self._view(room,seat,done)}
+
+    def explain(self, code, token, event_id):
+        from nabla_steps import explain_event
+        with self.lock:
+            now=self.clock()
+            room,seat=self._authenticated(code,token,now)
+            if room is None:
+                return self.fail('認証に失敗しました。','unauthorized')
+            if not isinstance(event_id,str) or len(event_id)>80:
+                return self.fail('履歴番号が不正です。')
+            game=room.get('game') or {}
+            ev=next((e for e in game.get('history',[]) if e.get('id')==event_id),None)
+            if ev is None:
+                return self.fail('計算履歴が見つかりません。')
+            if '_explanation' not in ev:
+                ev['_explanation']=explain_event(ev)
+                self.store.save(room)
+            return {'ok':True,'explanation':ev['_explanation']}
 
     def leave(self, code, token):
         with self.lock:

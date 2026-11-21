@@ -93,6 +93,7 @@ button:hover{background:#f3f3f3}button:focus-visible{outline:3px solid #555;outl
 .cpu-spinner{width:26px;height:26px;border:3px solid #ddd;border-top-color:#111;border-radius:50%;margin:0 auto;animation:cpu-spin 1s linear infinite}
 @keyframes cpu-spin{to{transform:rotate(360deg)}}
 </style>
+<link rel="stylesheet" href="/nabla_upgrade.css">
 </head>
 <body>
 <section class="home" id="home">
@@ -150,4 +151,5 @@ button:hover{background:#f3f3f3}button:focus-visible{outline:3px solid #555;outl
 <section class="handoff hidden" id="handoff"><div class="handoff-inner"><h2 id="handoffTitle">手番交代</h2><p id="handoffDetail">次のプレイヤーが準備してください。</p><button type="button" id="readyBtn">準備完了</button></div></section>
 <div class="modal-shade" id="modalShade" role="dialog" aria-modal="true"><div class="modal"><h2 id="modalTitle"></h2><div id="modalText" class="modal-text"></div><div class="modal-row"><button id="closeModal">閉じる</button></div></div></div>
 <script src="/app.js"></script>
+<script src="/nabla_upgrade_ui.js"></script>
 </body></html>

@@ -8,9 +8,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from random import Random
+import secrets
 from typing import Any
 
 from cards import CARD_COUNTS, build_deck
+from nabla_upgraderules import restrict_initial_hands, draw_allowed_cards
+# NABLA-REVISION-2026-11
 from nabla_math import (
     apply_card, apply_mixed_chain, apply_whole_board,
     proportional_on_shared_domain,
@@ -39,10 +42,11 @@ def new_game(seed: int | None = None) -> dict[str, Any]:
 
     `seed` is solely for reproducible local testing; use entropy in production.
     """
-    deck = build_deck(seed=seed)
+    deck = restrict_initial_hands(build_deck(seed=seed))
     current = Random(seed).randrange(2)
     return {
-        'version': 2,
+        'version': 3,
+        'game_id': secrets.token_hex(12) if seed is None else 'seed-'+str(seed),
         'players': [
             {'name': 'プレイヤー1', 'hand': deck[:7], 'bases': [_base(1,'1'),_base(2,'x'),_base(3,'x**2')], 'next_basis_id': 4},
             {'name': 'プレイヤー2', 'hand': deck[7:14], 'bases': [_base(1,'1'),_base(2,'x'),_base(3,'x**2')], 'next_basis_id': 4},
@@ -94,12 +98,13 @@ def _complete(state, actor, event, used_indexes):
     for i in sorted(used_indexes, reverse=True):
         del hand[i]
     state['discard'].extend(used)
-    draw_count = min(len(used), len(state['deck']))
-    hand.extend(state['deck'][:draw_count])
-    del state['deck'][:draw_count]
+    drawn = draw_allowed_cards(state['deck'],len(used),state['turn_number'])
+    draw_count = len(drawn)
+    hand.extend(drawn)
     event['used_cards'] = used
     event['draw_count'] = draw_count
     event['deck_remaining'] = len(state['deck'])
+    event['id'] = str(state.get('game_id','legacy'))+'-'+str(state['revision']+1)
     state['history'].append(event)
     state['consecutive_passes'] = 0
     state['revision'] += 1
@@ -169,6 +174,7 @@ def play(state: dict[str, Any], actor: int, action: dict[str, Any],
         event = {'actor':actor, 'kind':'pass', 'reason':why, 'turn':state['turn_number'],
                  'used_cards':[], 'draw_count':0}
         next_state['consecutive_passes'] += 1
+        event['id'] = str(state.get('game_id','legacy'))+'-'+str(state['revision']+1)
         next_state['history'].append(event)
         next_state['revision'] += 1
         if next_state['consecutive_passes'] >= 2:
@@ -276,6 +282,7 @@ def play(state: dict[str, Any], actor: int, action: dict[str, Any],
         event['draw_count']=0
         if operation_result.get('result'):
             event['calculations'].append(operation_result['result'].to_dict())
+        event['id'] = str(state.get('game_id','legacy'))+'-'+str(state['revision']+1)
         bad_state['history'].append(event)
         bad_state['revision'] += 1
         return _response('foul', bad_state, event['reason'], event=event)
@@ -315,7 +322,7 @@ def public_view(state: dict[str, Any], viewer: int) -> dict[str, Any]:
     if not _valid_player(viewer):
         raise ValueError('プレイヤー番号が不正です。')
     return {
-        'revision': state['revision'], 'turn_number':state['turn_number'],
+        'game_id':state.get('game_id'), 'revision': state['revision'], 'turn_number':state['turn_number'],
         'current':state['current'], 'deck_remaining':len(state['deck']),
         'players': [
             {'name':p['name'], 'bases':deepcopy(p['bases']),

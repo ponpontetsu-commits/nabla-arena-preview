@@ -164,3 +164,6 @@ def take_cpu_turn(state, difficulty='medium', *, seed=None, max_seconds=5.0):
         outcome = play(state, CPU_SEAT, {'kind': 'pass'}, expected_revision=state['revision'])
         action = {'kind': 'pass'}
     return action, outcome
+
+# NABLA-REVISION-2026-11 -- tested strategy modules replace earlier heuristics.
+from nabla_cpu2 import choose_cpu_action, take_cpu_turn

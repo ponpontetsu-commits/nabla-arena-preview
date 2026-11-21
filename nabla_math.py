@@ -274,6 +274,14 @@ def available_inverse_branches(expr):
         return [('principal', sp.asin(X), sp.Interval(-sp.pi/2,sp.pi/2), '元の関数 sin(x) を [-pi/2,pi/2] に制限')]
     if expr==sp.cos(X):
         return [('principal', sp.acos(X), sp.Interval(0,sp.pi), '元の関数 cos(x) を [0,pi] に制限')]
+    if expr == sp.tan(X):
+        return [('principal',sp.atan(X),sp.Interval.open(-sp.pi/2,sp.pi/2),
+                 'tan(x) を (-pi/2,pi/2) に制限します。')]
+    if expr.func == sp.exp:
+        rate=sp.diff(expr.args[0],X)
+        if rate.is_real and rate.is_number and rate.is_zero is False and not expr.args[0].subs(X,0):
+            return [('standard',sp.log(X)/rate,sp.S.Reals,
+                     '単調な指数関数の逆を自然対数として計算します。')]
     return []
 
 
@@ -314,6 +322,16 @@ def apply_card(before_text: str, operation: str, operand: str | None = None,
             if result.has(sp.Integral):
                 # Some elementary cases require alternative integrators.
                 result = sp.integrate(expr, X)
+            if not _is_elementary(result):
+                # Fallback only after the existing algorithms did not produce
+                # an elementary primitive. The next check is exact.
+                try:
+                    from sympy.integrals.manualintegrate import manualintegrate
+                    alternative=manualintegrate(expr,X)
+                    if _is_elementary(alternative) and sp.simplify(sp.diff(alternative,X)-expr)==0:
+                        result=alternative
+                except (ValueError, TypeError, NotImplementedError, RecursionError):
+                    pass
             if not _is_elementary(result):
                 raise UnsupportedMath('積分結果が初等関数で表せると証明できません。')
             if not is_one_over_x and sp.simplify(sp.diff(result,X)-expr)!=0:

@@ -83,8 +83,8 @@ async function runCpuTurn(){
  $('cpuThinking').classList.remove('hidden');
  render();setMessage('CPUが合法手を評価しています。');
  try{
-  await new Promise(resolve=>setTimeout(resolve,900));
-  const data=await api('cpu',{revision:model.revision});
+  
+  const data=await api('cpu',{revision:model.revision,game_id:model.game_id});
   model=data.state;selected=[];target=null;order=[];
   if(model.finished){renderFinished();showResult()}
   else {render();setMessage('CPUの操作を計算ログに表示しました。あなたの番です。')}
@@ -185,7 +185,7 @@ function makeAction(){
 async function submit(action){
  if(busy)return;busy=true;$('executeBtn').disabled=true;
  try{
-  const data=isOnline()?await api('online/action',{room:online.room,action,revision:model.revision}):await api('action',{action,revision:model.revision});
+  const data=isOnline()?await api('online/action',{room:online.room,action,revision:model.revision,game_id:model.game_id}):await api('action',{action,revision:model.revision,game_id:model.game_id});
   if(data.branch_options?.length){
    pendingAction=action;
    openModal('逆関数の枝を選択',`<p>使用する枝を選択してください。計算結果は確定後に表示します。</p><div class="branch-buttons">${data.branch_options.map(x=>`<button type="button" class="branch-option" data-branch="${enc(x)}">${enc(x)}</button>`).join('')}</div>`);
