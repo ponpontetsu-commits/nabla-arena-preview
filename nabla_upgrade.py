@@ -190,7 +190,7 @@ def apply_card""", 'additional verified inverse families')
                         "api('cpu',{revision:model.revision,game_id:model.game_id})", 'CPU UI game ID')
     script=replace_once(script,"{room:online.room,action,revision:model.revision}):await api('action',{action,revision:model.revision}",
                         "{room:online.room,action,revision:model.revision,game_id:model.game_id}):await api('action',{action,revision:model.revision,game_id:model.game_id}", 'online and local action game ID')
-    script=replace_once(script,"   await new Promise(resolve=>setTimeout(resolve,900));\n","",'remove artificial 900ms CPU delay')
+    script=replace_once(script,"await new Promise(resolve=>setTimeout(resolve,900));","",'remove artificial 900ms CPU delay')
     changes['app.js']=script
 
     # Syntax check every generated Python file before touching the source tree.
