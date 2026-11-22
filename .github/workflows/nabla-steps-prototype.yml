@@ -1,0 +1,52 @@
+
+name: NABLA Steps Prototype
+
+on:
+  push:
+    branches:
+      - nabla-math-steps-prototype
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout prototype branch
+        uses: actions/checkout@v4
+        with:
+          ref: nabla-math-steps-prototype
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Apply prototype patch
+        run: python nabla_steps_patch.py
+
+      - name: Check Python syntax
+        run: python -m compileall -q .
+
+      - name: Run prototype tests
+        run: python -m unittest discover -v -p 'test_nabla_steps_prototype.py'
+
+      - name: Run existing regression tests
+        run: python -m unittest discover -v -p 'test_*.py'
+
+      - name: Commit verified changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add nabla_steps.py
+          if ! git diff --cached --quiet; then
+            git commit -m "Apply verified NABLA math steps prototype"
+            git push origin HEAD:nabla-math-steps-prototype
+          fi
