@@ -118,6 +118,43 @@ def route_get(path):
     return (*_http_result({'ok': False, 'message':'ページが見つかりません。'},404), 'application/json; charset=utf-8')
 
 
+# NABLA-MATH-PRESENTATION-2026-11
+
+def _decorate_practice_response(payload):
+    """Only enrich returned copies: never change the authoritative game state."""
+    state = payload.get('state') if isinstance(payload, dict) else None
+    if not isinstance(state, dict):
+        return payload
+    for player in state.get('players', []):
+        for basis in player.get('bases', []):
+            basis['mathml'] = _mathml(basis.get('expression'))
+    # The practice screen renders only the last ten events. Do not render
+    # hundreds of old event formulas on every card operation.
+    for event in state.get('history', [])[-10:]:
+        for field in ('before', 'after'):
+            if isinstance(event.get(field), str):
+                event[field + '_mathml'] = _mathml(event[field])
+        for calc in event.get('calculations', []):
+            for field in ('before', 'after'):
+                if isinstance(calc.get(field), str):
+                    calc[field + '_mathml'] = _mathml(calc[field])
+    return payload
+
+
+def _explain_practice(data):
+    """Compute verified educational detail only after the player requests it."""
+    room = _STATE.get('practice')
+    if room is None:
+        return {'ok': False, 'message': '練習モードが開始されていません。'}
+    node = data.get('node')
+    index = data.get('history_index')
+    if str(node) != room.current:
+        return {'ok': False, 'message': '盤面が変更されました。履歴を選び直してください。'}
+    history = room.nodes[room.current]['game'].get('history', [])
+    if type(index) is not int or not 0 <= index < len(history):
+        return {'ok': False, 'message': '計算履歴が見つかりません。'}
+    return {'ok': True, 'explanation': explain_event(history[index])}
+
 def route_post(path, data):
     global _STATE
     with _LOCK:
@@ -138,8 +175,10 @@ def route_post(path, data):
                       'mode':mode,'difficulty':difficulty,
                       'deadline':time.time()+120 if mode=='cpu' and state['current']==0 else None}
             return _http_result({'ok':True,'state':_view()})
+        if path == '/api/practice/explain':
+            return _http_result(_explain_practice(data))
         if path.startswith('/api/practice/'):
-            return _http_result(dispatch_practice(_STATE,path,data))
+            return _http_result(_decorate_practice_response(dispatch_practice(_STATE,path,data)))
         if path == '/api/explain':
             game=_STATE.get('game') or {}
             ev=next((e for e in game.get('history',[]) if e.get('id')==data.get('event_id')),None)

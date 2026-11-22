@@ -1,3 +1,5 @@
+
+# NABLA-MATH-PRESENTATION-2026-11
 """Verified educational calculations for NABLA ARENA.
 
 This module only explains moves which the authoritative engine has already
@@ -117,6 +119,45 @@ def _operation_name(card):
             'limsup_plus_inf':'limit', 'liminf_plus_inf':'limit'}.get(card,card)
 
 
+def _mixed_operation_steps(expr, after, codes):
+    """Exact stepwise multiplication/division, verified against final result."""
+    from nabla_game import FUNCTIONS
+    if not codes or len(codes)%2:
+        return [_line('指定順に左から乗算・除算を行いました。')]
+    current=expr
+    lines=[]
+    for i in range(0,len(codes),2):
+        op, factor_code = codes[i:i+2]
+        if op not in ('mul','div') or factor_code not in FUNCTIONS:
+            return [_line('指定順に左から乗算・除算を行いました。')]
+        factor=_parse(FUNCTIONS[factor_code])
+        if op=='div' and factor == 0:
+            return [_line('0による除算は認められません。')]
+        raw=sp.Mul(current,factor if op=='mul' else sp.Pow(factor,-1,evaluate=False),evaluate=False)
+        simplified=sp.simplify(raw)
+        if not _verified(raw,simplified):
+            return [_line('演算過程を厳密に展開できません。確定済みの演算結果を確認してください。')]
+        lines.append(_line('乗算します。' if op=='mul' else '除算します。定義域の制約にも注意します。',_eq(raw,simplified)))
+        current=simplified
+    if _verified(current,after):
+        lines.append(_line('最終結果を整理します。',_eq(current,after)))
+    else:
+        lines.append(_line('中間結果と確定済みの結果の一致を確認できません。'))
+    return lines
+
+
+def _friendly_math_text(value):
+    """Avoid printing raw LaTeX commands as prose; leave math data untouched."""
+    text=str(value)
+    for original,replacement in (
+        (r'\mathbb{R}','ℝ'), (r'\infty','∞'), (r'\cup',' ∪ '),
+        (r'\cap',' ∩ '), (r'\left',''), (r'\right',''),
+        (r'\geq','≥'), (r'\leq','≤'), (r'\neq','≠'),
+        (r'\{','{'), (r'\}','}'), (r'\pi','π'),
+    ):
+        text=text.replace(original,replacement)
+    return text
+
 def _derive(before, after, operation, event):
     items=[]
     try:
@@ -127,8 +168,7 @@ def _derive(before, after, operation, event):
         elif result is not None and operation == 'integrate':
             items.extend(_integration_steps(expr,result))
         elif result is not None and operation in ('mul','div'):
-            items.append(_line('選択した乗除算カードを左から順に作用させます。'))
-            items.append(_line('計算後の数式を整理します。',_eq(sp.Symbol('R'),result)))
+            items.extend(_mixed_operation_steps(expr,result,event.get('used_cards') or []))
         elif operation == 'limit':
             items.append(_line('元の定義域から接近可能な方向と極限の存在を判定します。'))
             if result is not None:
@@ -138,7 +178,9 @@ def _derive(before, after, operation, event):
                 items.append(_line('実数上で √(x²)=|x| です。',_eq(sp.sqrt(X**2),sp.Abs(X))))
             items.append(_line('平方根の実数定義域を確認します。',_eq(sp.sqrt(expr),result)))
         elif operation == 'log' and result is not None:
-            items.append(_line('log は自然対数です。真数が正となる範囲を確認します。',_eq(sp.log(expr),result)))
+            items.append(_line('log は自然対数です。真数が正となる範囲を確認します。'))
+            if sp.log(expr) != result:
+                items.append(_line('自然対数を整理します。',_eq(sp.log(expr),result)))
         elif operation == 'inverse' and result is not None:
             items.append(_line('元の関数の定義域と逆関数の枝を確認します。'))
             composed=sp.simplify(expr.subs(X,result))
@@ -167,9 +209,11 @@ def explain_event(event):
         steps=supplemental or [_line('計算過程を厳密に展開できないため、既存の判定結果を表示します。')]
         domain=calc.get('domain_before')
         if domain:
-            steps.insert(0, _line('演算前の定義域：'+str(domain)))
+            steps.insert(0, _line('演算前の定義域：'+_friendly_math_text(domain)))
+        if calc.get('domain_after') and calc.get('domain_after') != domain:
+            steps.append(_line('演算後の定義域：'+_friendly_math_text(calc['domain_after'])))
         if calc.get('domain_changed_note'):
-            steps.append(_line(calc['domain_changed_note']))
+            steps.append(_line(_friendly_math_text(calc['domain_changed_note'])))
         if calc.get('reason'):
             steps.append(_line('判定：'+str(calc['reason'])))
         result.append({'id':calc.get('id'), 'steps':steps[:20]})
