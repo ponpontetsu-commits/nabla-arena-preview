@@ -1,251 +1,321 @@
-"""NABLA ARENA precision-first performance upgrade — combined release.
+"""NABLA ARENA: textbook math rendering and explainable practice history.
 
-For the existing feature branch 'nabla-arena-update' ONLY.
-Upload THIS file as nabla_upgrade.py using GitHub's Upload files page on
-that branch. The existing Actions workflow executes it and validates changes.
-Never upload to main; the stable game must remain untouched.
+Upload only this file as `nabla_upgrade.py` to the nabla-arena-update
+feature branch. The existing GitHub Action applies this patch and commits
+validated changes. Does NOT change any game decision, rules, or main branch.
 
-Changes:
-- Use certified polynomial/derivative independence witnesses before expensive methods.
-- Prefer cheap exact zero checks; memoize function evaluations at exact points.
-- Cache mathematically exact MathML renderings on the server.
-- Apply full-span verification to manual practice edits as well as card actions.
-- Preserve conservative unsupported verdicts, domains, and all game rules.
+Features:
+* Render every practice board function with trusted server-generated MathML.
+* Use readable expressions in native dropdown menus instead of Python syntax.
+* Show before/after, reasoning, eliminated bases and actor/target in practice log.
+* Generate optional detailed, verified steps on demand (not on every tap).
+* Avoid displaying raw LaTeX escapes as prose (e.g. \\mathbb{R}).
+* Show actual operand-by-operand identities when explaining multiplications.
+* Keep math rendering separate from the authoritative SymPy engine.
 """
 from __future__ import annotations
 
 import ast
 from pathlib import Path
+import shutil
 import subprocess
 import sys
+import tempfile
 
 ROOT = Path(__file__).resolve().parent
-MARK = 'NABLA-PRECISION-PERFORMANCE-2026-11'
-BASE_MARK = 'NABLA-SPEED-2026-11'
+MARK = 'NABLA-MATH-PRESENTATION-2026-11'
 
 
-def replace_one(src: str, before: str, after: str, label: str) -> str:
-    n = src.count(before)
+def one(src: str, old: str, new: str, what: str) -> str:
+    n = src.count(old)
     if n != 1:
-        raise RuntimeError(f'{label}: exact match expected once; got {n}. No files changed.')
-    return src.replace(before, after, 1)
+        raise RuntimeError(f'{what}: expected one anchor, found {n}')
+    return src.replace(old, new, 1)
 
 
-def run():
-    paths = {name: ROOT / name for name in ('nabla_linear.py', 'server.py', 'nabla_practice.py')}
-    for name, path in paths.items():
-        if not path.is_file():
-            raise RuntimeError(f'Missing {name}; no files changed.')
-    before = {name: path.read_text(encoding='utf-8') for name, path in paths.items()}
-    if all(MARK in text for text in before.values()):
-        print('Speed patch 2 already installed; no changes necessary.')
-        return
-    if any(MARK in text for text in before.values()):
-        raise RuntimeError('Partial speed-2 installation; refusing to write.')
-    if BASE_MARK not in before['nabla_linear.py'] or 'NABLA-REVISION-2026-11' not in before['server.py']:
-        raise RuntimeError('Required prior upgrades are missing; refusing to write.')
+def server_patch(src):
+    helper = '''# NABLA-MATH-PRESENTATION-2026-11
 
-    linear = before['nabla_linear.py']
-    # SymPy assumptions are sufficient proofs when explicitly True or False.
-    # Avoid calling the more expensive simplify() for proven elementary cases.
-    linear = replace_one(linear,
-        '''    try:
-        z = sp.simplify(value)
-        if z == 0 or z.is_zero is True:
-            return True
-        if z.is_zero is False or z.is_positive is True or z.is_negative is True:
-            return False''',
-        '''    try:
-        if value == 0 or getattr(value, 'is_zero', None) is True:
-            return True
-        if (getattr(value, 'is_zero', None) is False
-                or getattr(value, 'is_positive', None) is True
-                or getattr(value, 'is_negative', None) is True):
-            return False
-        z = sp.simplify(value)
-        if z == 0 or z.is_zero is True:
-            return True
-        if z.is_zero is False or z.is_positive is True or z.is_negative is True:
-            return False''',
-        'certified zero fast path')
-    linear = replace_one(linear,
-        '\ndef _at_point(expressions, point):',
-        '''
-# ''' + MARK + '''
-def _polynomial_degree_witness(target, old_exprs, domain):
-    """Sufficient, exact linear-independence certificate on an open interval.
-
-    If existing functions are polynomials of degree <= d, every real constant
-    combination has derivative (d+1) identically zero. A provably nonzero
-    (d+1)st derivative of the candidate at a regular interior point proves
-    independence. Never claim dependence or use approximate thresholds here.
-    """
-    if not _interval_exists(domain):
-        return False
-    if target.has(sp.Piecewise, sp.Abs, sp.sign, sp.floor, sp.ceiling):
-        return False
-    try:
-        polys = [sp.Poly(f, X) for f in old_exprs]
-        degree = max((p.degree() for p in polys if not p.is_zero), default=-1)
-        if degree < 0 or degree > 9:
-            return False
-        derivative = sp.diff(target, X, degree + 1)
-        if derivative == 0:
-            return False
-        interior = domain.interior
-        for point in _POINT_CANDIDATES[:9]:
-            if interior.contains(point) is not sp.S.true:
-                continue
-            evaluated = _at_point((derivative,), point)
-            if evaluated and _zero_proof(evaluated[0]) is False:
-                return True
-    except (sp.PolynomialError, ValueError, TypeError,
-            NotImplementedError, RecursionError, OverflowError, AttributeError):
-        pass
-    return False
+def _decorate_practice_response(payload):
+    """Only enrich returned copies: never change the authoritative game state."""
+    state = payload.get('state') if isinstance(payload, dict) else None
+    if not isinstance(state, dict):
+        return payload
+    for player in state.get('players', []):
+        for basis in player.get('bases', []):
+            basis['mathml'] = _mathml(basis.get('expression'))
+    # The practice screen renders only the last ten events. Do not render
+    # hundreds of old event formulas on every card operation.
+    for event in state.get('history', [])[-10:]:
+        for field in ('before', 'after'):
+            if isinstance(event.get(field), str):
+                event[field + '_mathml'] = _mathml(event[field])
+        for calc in event.get('calculations', []):
+            for field in ('before', 'after'):
+                if isinstance(calc.get(field), str):
+                    calc[field + '_mathml'] = _mathml(calc[field])
+    return payload
 
 
-def _at_point(expressions, point):''',
-        'exact derivative proof')
+def _explain_practice(data):
+    """Compute verified educational detail only after the player requests it."""
+    room = _STATE.get('practice')
+    if room is None:
+        return {'ok': False, 'message': '練習モードが開始されていません。'}
+    node = data.get('node')
+    index = data.get('history_index')
+    if str(node) != room.current:
+        return {'ok': False, 'message': '盤面が変更されました。履歴を選び直してください。'}
+    history = room.nodes[room.current]['game'].get('history', [])
+    if type(index) is not int or not 0 <= index < len(history):
+        return {'ok': False, 'message': '計算履歴が見つかりません。'}
+    return {'ok': True, 'explanation': explain_event(history[index])}
 
-    # All cached values are exact SymPy expressions, never floating approximations.
-    # This is effective across repeated candidate checks against unchanged bases.
-    linear = replace_one(linear,
-        '''def _at_point(expressions, point):
-    values = []
-    for expr in expressions:
-        try:
-            val = sp.simplify(expr.subs(X, point))
-            if val.has(sp.nan, sp.zoo, sp.oo, -sp.oo) or val.is_real is not True or val.is_finite is not True:
-                return None
-            values.append(val)
-        except (ValueError, TypeError, NotImplementedError, RecursionError, OverflowError):
-            return None
-    return values''',
-        '''@lru_cache(maxsize=4096)
-# ''' + MARK + '''
-def _exact_value_at(expr, point):
-    try:
-        val = expr.subs(X, point)
-        if val.has(sp.nan, sp.zoo, sp.oo, -sp.oo):
-            return None
-        if val.is_real is True and val.is_finite is True:
-            return val
-        val = sp.simplify(val)
-        if (val.has(sp.nan, sp.zoo, sp.oo, -sp.oo)
-                or val.is_real is not True or val.is_finite is not True):
-            return None
-        return val
-    except (ValueError, TypeError, NotImplementedError, RecursionError, OverflowError):
-        return None
+'''
+    src=one(src, 'def route_post(path, data):\n', helper+'def route_post(path, data):\n','server helper')
+    src=one(src, "        if path.startswith('/api/practice/'):\n            return _http_result(dispatch_practice(_STATE,path,data))",
+        "        if path == '/api/practice/explain':\n            return _http_result(_explain_practice(data))\n        if path.startswith('/api/practice/'):\n            return _http_result(_decorate_practice_response(dispatch_practice(_STATE,path,data)))", 'server practice route')
+    return src
 
 
-def _at_point(expressions, point):
-    values = [_exact_value_at(expr, point) for expr in expressions]
-    return None if any(val is None for val in values) else values''',
-        'exact evaluation cache')
+def ui_patch(src):
+    helper = r''' // NABLA-MATH-PRESENTATION-2026-11
+ // Only a fallback for native <option> and rare MathML failures. Never use
+ // text formatting to decide mathematical equality or to alter card inputs.
+ function practicePretty(text){
+   let value=String(text??'');
+   const superscript=n=>String(n).replace(/[0-9+-]/g,c=>({'0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','+':'⁺','-':'⁻'}[c]||c));
+   value=value.replace(/\b(sin|cos|tan)\(x\)\*\*([0-9]+)/g,(_,fn,n)=>fn+superscript(n)+'(x)');
+   value=value.replace(/\bx\*\*([0-9]+)/g,(_,n)=>'x'+superscript(n));
+   value=value.replace(/\bexp\(x\)/g,'eˣ');
+   value=value.replace(/\bsqrt\(/g,'√(');
+   value=value.replace(/\bAbs\(([^()]*)\)/g,'|$1|');
+   value=value.replace(/\*\*/g,'^');
+   value=value.replace(/\*/g,' × ');
+   value=value.replace(/\\mathbb\{R\}/g,'ℝ').replace(/\\infty/g,'∞').replace(/\\left|\\right/g,'');
+   return value;
+ }
+ function practiceMath(code,mathml){
+   // MathML is generated by the server's allowlisted SymPy parser.
+   return mathml ? `<span class="practice-formula">${mathml}</span>` :
+      `<span class="practice-formula">${esc(practicePretty(code))}</span>`;
+ }
+ function practiceLogEvent(ev,i){
+   const who = ev.actor===0?'盤面A':ev.actor===1?'盤面B':'練習';
+   const where = ev.target_player===0?'盤面A':ev.target_player===1?'盤面B':'盤面';
+   const cards=(ev.used_cards||[]).map(c=>DICT[c]||c).join(' → ');
+   const edit = ev.kind==='edit' ? '手動編集' : (ev.kind==='add'?'関数追加':(ev.kind==='pass'?'パス':'演算'));
+   const numbers = Number.isInteger(ev.basis_id)?`／No.${ev.basis_id}`:'';
+   let content=`<article class="practice-event"><div class="practice-event-heading">第${esc(ev.turn??i+1)}手｜${esc(edit)}：${esc(cards||ev.edit_operation||'')}</div>
+     <div class="practice-event-target">操作側：${who} ／ 対象：${where}${numbers}</div>`;
+   const calcs=ev.calculations||[];
+   if(calcs.length){
+     calcs.forEach((calc,j)=>{
+       content+=`<section class="practice-calculation"><div class="practice-calc-title">${calc.id?'No.'+esc(calc.id)+'／':''}計算${j+1}</div>`;
+       if(calc.before!=null)content+=`<div class="practice-math-label">演算前</div><div class="practice-math-line">${practiceMath(calc.before,calc.before_mathml)}</div>`;
+       if(calc.after!=null)content+=`<div class="practice-math-label">演算後</div><div class="practice-math-line">${practiceMath(calc.after,calc.after_mathml)}</div>`;
+       if(calc.reason)content+=`<div class="practice-note">判定：${esc(calc.reason)}</div>`;
+       if(calc.domain_changed_note)content+=`<div class="practice-note">${esc(practicePretty(calc.domain_changed_note))}</div>`;
+       content+='</section>';
+     });
+   }else{
+     if(typeof ev.before==='string')content+=`<div class="practice-math-label">演算前</div><div class="practice-math-line">${practiceMath(ev.before,ev.before_mathml)}</div>`;
+     if(typeof ev.after==='string')content+=`<div class="practice-math-label">追加・演算後</div><div class="practice-math-line">${practiceMath(ev.after,ev.after_mathml)}</div>`;
+   }
+   if(ev.removed?.length)content+=`<div class="practice-removed">${ev.removed.map(r=>`<div><strong>No.${esc(r.id)} 消滅</strong>：${esc(r.reason||'線形従属')}</div>`).join('')}</div>`;
+   if(ev.reason)content+=`<div class="practice-note">${esc(ev.reason)}</div>`;
+   if(calcs.length)content+=`<button type="button" class="practice-explain-button" data-practice-explain="${i}">詳しい途中計算を表示</button><div class="practice-explanation" hidden></div>`;
+   return content+'</article>';
+ }
+'''
+    src=one(src, ' function renderPractice(){\n',helper+' function renderPractice(){\n','practice helper')
+    src=one(src,
+        "${p.bases.map(b=>`<span>No.${b.id}：${esc(b.expression)}</span>`).join('')||'<small>基底なし</small>'}",
+        "${p.bases.map(b=>`<span>No.${b.id}：${practiceMath(b.expression,b.mathml)}</span>`).join('')||'<small>基底なし</small>'}", 'board MathML')
+    src=one(src,
+        "${Number(targetBasis)===b.id?'selected':''}>No.${b.id}：${esc(b.expression)}</option>",
+        "${Number(targetBasis)===b.id?'selected':''}>No.${b.id}：${esc(practicePretty(b.expression))}</option>", 'basis select Math')
+    src=one(src,
+        "${esc(b.expression)}</option>`).join('');\n    input.value='';",
+        "${esc(practicePretty(b.expression))}</option>`).join('');\n    input.value='';", 'refresh basis select Math')
+    old="const recent=(pstate.history||[]).slice(-5).reverse().map(e=>`<article>第${esc(e.turn)}手　${esc((e.used_cards||[]).join(' → '))} ${e.removed?.length?'／基底消滅 '+esc(e.removed.map(x=>'No.'+x.id).join(',')):''}</article>`).join('');"
+    new="const history=pstate.history||[];\n   const recent=history.slice(-10).map((e,j)=>practiceLogEvent(e,history.length-Math.min(10,history.length)+j)).reverse().join('');"
+    src=one(src,old,new,'practice event log')
+    old="   root.querySelector('#practiceExit').addEventListener('click',async()=>{"
+    new=r'''   root.querySelectorAll('[data-practice-explain]').forEach(button=>button.addEventListener('click',async()=>{
+     const box=button.nextElementSibling;
+     if(!box)return;
+     if(!box.hidden){box.hidden=true;button.textContent='詳しい途中計算を表示';return;}
+     box.hidden=false;button.textContent='詳しい途中計算を閉じる';
+     if(box.dataset.loaded)return;
+     box.textContent='確認済みの計算過程を取得中…';
+     button.disabled=true;
+     try{
+       const response=await practiceAPI('explain',{node:pstate.current_node,history_index:Number(button.dataset.practiceExplain)});
+       box.innerHTML=labelExplanation(response.explanation);
+       box.dataset.loaded='1';
+     }catch(err){box.textContent='途中計算を表示できません：'+err.message;}
+     finally{button.disabled=false;}
+   }));
+   root.querySelector('#practiceExit').addEventListener('click',async()=>{'''
+    src=one(src,old,new,'practice lazy explanations')
+    return src
 
-    linear = replace_one(linear,
-        '''        old_exprs = [f for _, f in pairs]
-        for id_, f in pairs:''',
-        '''        old_exprs = [f for _, f in pairs]
-        # Prefer certified, low-cost tests when existing bases are polynomials.
-        # General symbolic solving, sampling and Wronskian remain as fallbacks.
-        if target.is_polynomial(X) is True and _poly_independent(target, old_exprs, _interval_exists(domain)):
-            return {'status': 'no', 'coefficients': {}}
-        if _polynomial_degree_witness(target, old_exprs, domain):
-            return {'status': 'no', 'coefficients': {}}
-        for id_, f in pairs:''',
-        'polynomial-first decision')
 
-    server = before['server.py']
-    server = replace_one(server,
-        'import threading\n',
-        'import threading\nfrom functools import lru_cache\n# ' + MARK + '\n',
-        'server mathml cache import')
-    server = replace_one(server,
-        'def _mathml(expression):',
-        '@lru_cache(maxsize=1024)\ndef _mathml(expression):',
-        'server mathml cache')
+def css_patch(src):
+    src=one(src,
+      '.nabla-practice .practice-bases span{',
+      '.nabla-practice .practice-bases > span{','practice base styles')
+    src+='''
+/* NABLA-MATH-PRESENTATION-2026-11: textbook typesetting and readable logs */
+.nabla-practice .practice-formula{display:inline-block;max-width:100%;overflow-x:auto;vertical-align:middle;white-space:nowrap;line-height:1.6}
+.nabla-practice .practice-formula math{font-size:1.12em}
+.nabla-practice .practice-bases > span{display:inline-flex;gap:5px;align-items:center;max-width:100%;overflow-x:auto;word-break:normal}
+.nabla-practice .practice-event{padding:12px 0;border-bottom:1px solid #d5d5d5}
+.nabla-practice .practice-event-heading{font-weight:700;margin-bottom:3px}
+.nabla-practice .practice-event-target{font-size:.9em;color:#555;margin-bottom:6px}
+.nabla-practice .practice-calculation{margin:9px 0;padding:8px 10px;border-left:2px solid #aaa;background:#fafafa}
+.nabla-practice .practice-calc-title{font-weight:600}
+.nabla-practice .practice-math-label{font-size:.85em;color:#555;margin-top:6px}
+.nabla-practice .practice-math-line{overflow-x:auto;white-space:nowrap;padding:4px 0;font-size:1.06em}
+.nabla-practice .practice-math-line math{font-size:1.13em}
+.nabla-practice .practice-note{font-size:.93em;line-height:1.6;margin:6px 0;overflow-wrap:anywhere}
+.nabla-practice .practice-removed{font-size:.96em;padding:5px 0}
+.nabla-practice .practice-explanation{padding:8px 10px;margin:8px 0;border:1px solid #ddd;border-radius:4px;overflow-x:auto}
+.nabla-practice .practice-explanation .nabla-step math{font-size:1.07em}
+.nabla-practice .practice-explain-button{font-size:.9em}
+'''
+    return src
 
-    # Existing practice manual edits were still checking pairwise proportionality,
-    # unlike card actions and whole-board operations. Unify the strict rule.
-    practice = before['nabla_practice.py']
-    practice = replace_one(practice,
-        'from nabla_math import proportional_on_shared_domain',
-        'from nabla_linear import relation_to_span\n# ' + MARK,
-        'manual practice import')
-    practice = replace_one(practice,
-        '''        for other in board:
-            dep=proportional_on_shared_domain(expr,other['expression'])
-            if dep=='yes':
-                raise ValueError('線形従属する基底は追加できません。')
-            if dep=='unsupported':
-                raise ValueError('基底の線形独立性を厳密に確認できません。')''',
-        '''        dep = relation_to_span(expr, [(b['id'], b['expression']) for b in board])
-        if dep['status'] == 'yes':
-            raise ValueError('線形従属する基底は追加できません。')
-        if dep['status'] == 'unsupported':
-            raise ValueError('基底の線形独立性を厳密に確認できません。')''',
-        'manual practice full-span checking')
 
-    for name, content in [('nabla_linear.py', linear), ('server.py', server),
-                          ('nabla_practice.py', practice)]:
-        ast.parse(content, filename=name)
+def steps_patch(src):
+    # This is educational presentation only; the verified game calculations
+    # remain in nabla_math.py and may never be replaced by these explanations.
+    mixed = '''def _mixed_operation_steps(expr, after, codes):
+    """Exact stepwise multiplication/division, verified against final result."""
+    from nabla_game import FUNCTIONS
+    if not codes or len(codes)%2:
+        return [_line('指定順に左から乗算・除算を行いました。')]
+    current=expr
+    lines=[]
+    for i in range(0,len(codes),2):
+        op, factor_code = codes[i:i+2]
+        if op not in ('mul','div') or factor_code not in FUNCTIONS:
+            return [_line('指定順に左から乗算・除算を行いました。')]
+        factor=_parse(FUNCTIONS[factor_code])
+        if op=='div' and factor == 0:
+            return [_line('0による除算は認められません。')]
+        raw=sp.Mul(current,factor if op=='mul' else sp.Pow(factor,-1,evaluate=False),evaluate=False)
+        simplified=sp.simplify(raw)
+        if not _verified(raw,simplified):
+            return [_line('演算過程を厳密に展開できません。確定済みの演算結果を確認してください。')]
+        lines.append(_line('乗算します。' if op=='mul' else '除算します。定義域の制約にも注意します。',_eq(raw,simplified)))
+        current=simplified
+    if _verified(current,after):
+        lines.append(_line('最終結果を整理します。',_eq(current,after)))
+    else:
+        lines.append(_line('中間結果と確定済みの結果の一致を確認できません。'))
+    return lines
 
-    # All source anchors and Python syntax are verified before writing.
-    for name, content in [('nabla_linear.py', linear), ('server.py', server), ('nabla_practice.py', practice)]:
-        path = paths[name]
-        path.with_name(path.name + '.nabla-speed2-pending').write_text(content, encoding='utf-8')
-    for name, path in paths.items():
-        path.with_name(path.name + '.nabla-speed2-pending').replace(path)
 
-    # The current workflow stages server.py but not nabla_linear.py by default.
-    # Add it explicitly, without changing branch settings or the original main.
-    subprocess.run(['git', 'add', 'nabla_linear.py', 'nabla_practice.py'], cwd=ROOT, check=True)
+def _friendly_math_text(value):
+    """Avoid printing raw LaTeX commands as prose; leave math data untouched."""
+    text=str(value)
+    for original,replacement in (
+        (r'\\mathbb{R}','ℝ'), (r'\\infty','∞'), (r'\\cup',' ∪ '),
+        (r'\\cap',' ∩ '), (r'\\left',''), (r'\\right',''),
+        (r'\\geq','≥'), (r'\\leq','≤'), (r'\\neq','≠'),
+        (r'\\{','{'), (r'\\}','}'), (r'\\pi','π'),
+    ):
+        text=text.replace(original,replacement)
+    return text
 
-    # CI smoke tests: exact verdict preservation including nonpairwise dependence.
-    from nabla_linear import relation_to_span
-    examples = [
-        ('x**3', ['1','x','x**2'], 'no'),
-        ('sin(x)', ['1','x','x**2'], 'no'),
-        ('exp(x)', ['1','x','x**2'], 'no'),
-        ('sin(x)**2', ['1','x','x**2'], 'no'),
-        ('log(x)', ['1','x','x**2'], 'no'),
-        ('sqrt(x)', ['1','x','x**2'], 'no'),
-        ('x', ['1','x','x**2'], 'yes'),
-        ('1+x', ['1','x'], 'yes'),
-        ('sin(x)+cos(x)', ['sin(x)','cos(x)'], 'yes'),
-        ('cos(x)**2', ['1','sin(x)**2'], 'yes'),
-        ('1', ['sin(x)**2','cos(x)**2'], 'yes'),
-        ('cos(x)**2', ['1','x','x**2','sin(x)**2'], 'yes'),
-    ]
-    for candidate, older, expected in examples:
-        result = relation_to_span(candidate, [(i + 1, expr) for i, expr in enumerate(older)])
-        if result['status'] != expected:
-            raise AssertionError(f'Unexpected {candidate} on {older}: {result}; expected {expected}')
-    more_examples = [
-        ('cos(x)', ['1', 'sin(x)**2'], 'no'),
-        ('cos(x)**2', ['1', 'sin(x)**2'], 'yes'),
-        ('1+x+x**2', ['1','x','x**2'], 'yes'),
-        ('exp(2*x)', ['1','x','x**2'], 'no'),
-        ('sin(x)**3', ['1','x','x**2'], 'no'),
-        ('sin(x)', ['sin(x)**2','cos(x)**2'], 'no'),
-    ]
-    for candidate, older, expected in more_examples:
-        result = relation_to_span(candidate, [(i + 1, expr) for i, expr in enumerate(older)])
-        if result['status'] != expected:
-            raise AssertionError(f'Unexpected {candidate} on {older}: {result}; expected {expected}')
+'''
+    src=one(src,'def _derive(before, after, operation, event):\n',mixed+'def _derive(before, after, operation, event):\n','explanation helpers')
+    old="""        elif result is not None and operation in ('mul','div'):
+            items.append(_line('選択した乗除算カードを左から順に作用させます。'))
+            items.append(_line('計算後の数式を整理します。',_eq(sp.Symbol('R'),result)))"""
+    new="""        elif result is not None and operation in ('mul','div'):
+            items.extend(_mixed_operation_steps(expr,result,event.get('used_cards') or []))"""
+    src=one(src,old,new,'real multiplication steps')
+    old="""        elif operation == 'log' and result is not None:
+            items.append(_line('log は自然対数です。真数が正となる範囲を確認します。',_eq(sp.log(expr),result)))"""
+    new="""        elif operation == 'log' and result is not None:
+            items.append(_line('log は自然対数です。真数が正となる範囲を確認します。'))
+            if sp.log(expr) != result:
+                items.append(_line('自然対数を整理します。',_eq(sp.log(expr),result)))"""
+    src=one(src,old,new,'non-tautological log step')
+    src=one(src,
+      "steps.insert(0, _line('演算前の定義域：'+str(domain)))",
+      "steps.insert(0, _line('演算前の定義域：'+_friendly_math_text(domain)))",'friendly domain')
+    src=one(src,
+      "        if calc.get('domain_changed_note'):",
+      "        if calc.get('domain_after') and calc.get('domain_after') != domain:\n            steps.append(_line('演算後の定義域：'+_friendly_math_text(calc['domain_after'])))\n        if calc.get('domain_changed_note'):",
+      'show post-operation domain')
+    src=one(src,
+      "steps.append(_line(calc['domain_changed_note']))",
+      "steps.append(_line(_friendly_math_text(calc['domain_changed_note'])))", 'friendly domain note')
+    return src
+
+
+def upgrade():
+    paths={name:ROOT/name for name in ('server.py','nabla_upgrade_ui.js','nabla_upgrade.css','nabla_steps.py')}
+    sources={name:path.read_text(encoding='utf-8') for name,path in paths.items()}
+    if any(MARK in source for source in sources.values()):
+        if all(MARK in source for source in sources.values()):
+            print('Presentation upgrade already applied; no changes necessary.')
+            return
+        raise RuntimeError('Partial presentation upgrade detected; refusing to proceed.')
+    new={
+        'server.py':server_patch(sources['server.py']),
+        'nabla_upgrade_ui.js':ui_patch(sources['nabla_upgrade_ui.js']),
+        'nabla_upgrade.css':css_patch(sources['nabla_upgrade.css']),
+        'nabla_steps.py':steps_patch(sources['nabla_steps.py']),
+    }
+    # The step engine also gets an explicit marker for idempotency.
+    new['nabla_steps.py']='\n# '+MARK+'\n'+new['nabla_steps.py']
+    for name in ('server.py','nabla_steps.py'):
+        ast.parse(new[name],filename=name)
+    node=shutil.which('node')
+    if node:
+        with tempfile.TemporaryDirectory() as d:
+            target=Path(d)/'nabla_upgrade_ui.js'
+            target.write_text(new['nabla_upgrade_ui.js'],encoding='utf-8')
+            result=subprocess.run([node,'--check',str(target)],capture_output=True,text=True)
+            if result.returncode:
+                raise RuntimeError('JavaScript syntax check failed: '+result.stderr)
+    # Anchor and syntax checks above precede all writes.
+    for name,path in paths.items():
+        path.write_text(new[name],encoding='utf-8')
+    # Smoke-test exactly the user-visible output using the existing engine.
+    from nabla_game import new_game
     from nabla_practice import Practice
-    p = Practice()
-    assert [player['dimension'] for player in p.view()['players']] == [3, 3]
-    print('MAX-PERF verified', len(examples) + len(more_examples), 'exact mathematical sample cases.')
-    print('Exact eval cache, MathML cache, polynomial witnesses and practice span checks installed.')
+    from server import _decorate_practice_response
+    p=Practice()
+    view=_decorate_practice_response({'ok':True,'state':p.view()})['state']
+    assert '<math' in view['players'][0]['bases'][2]['mathml']
+    assert 'x**2' == view['players'][0]['bases'][2]['expression']
+    game=new_game(seed=4)
+    assert len(game['players'])==2
+    from nabla_steps import explain_event
+    example={'id':'math-presentation-test','used_cards':['mul','sin'],
+             'calculations':[{'before':'sin(x)','after':'sin(x)**2',
+                              'domain_before':r'\mathbb{R}'}]}
+    explanation=explain_event(example)
+    assert explanation['calculations'] and explanation['calculations'][0]['steps']
+    strings=[step['explanation'] for step in explanation['calculations'][0]['steps']]
+    assert any('ℝ' in s for s in strings) and all(r'\mathbb{R}' not in s for s in strings)
+    assert any(step.get('mathml') for step in explanation['calculations'][0]['steps'])
+    # Existing Actions stages a fixed file list; stage additional changed UI and
+    # explanation files, but commit occurs only AFTER all workflow tests pass.
+    if (ROOT/'.git').exists() and shutil.which('git'):
+        subprocess.run(['git','add','nabla_upgrade_ui.js','nabla_upgrade.css','nabla_steps.py'],cwd=ROOT,check=True)
+    print('MathML practice board, readable history, and on-demand verified steps installed.')
 
 
-if __name__ == '__main__':
+if __name__=='__main__':
     try:
-        run()
+        upgrade()
     except Exception as exc:
-        print('NABLA MAX-PERF FAILED: ' + str(exc), file=sys.stderr)
+        print('NABLA presentation upgrade failed: '+str(exc),file=sys.stderr)
         sys.exit(1)
