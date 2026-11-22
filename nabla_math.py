@@ -502,6 +502,8 @@ def apply_whole_board(bases: list[tuple[int,str]], order: int) -> dict[str, Any]
     if unsupported: return {'status':'unsupported','reason':'少なくとも1基底が計算未対応。全体演算を取り消します。'}
     fouls=[r for _,r in results if r.status in ('foul','input_error')]
     if fouls: return {'status':'foul','reason':'全体演算に反則が含まれています。'}
+    from nabla_linear import relation_to_span, relation_reason
+    # NABLA-LINEAR-SPAN-2026-11
     kept=[]; removed=[]
     for no,r in sorted(results,key=lambda z:z[0]):
         if r.status=='vanished':
@@ -509,15 +511,12 @@ def apply_whole_board(bases: list[tuple[int,str]], order: int) -> dict[str, Any]
             continue
         if r.after is None:
             return {'status':'unsupported','reason':'結果が確定できません。'}
-        dup=False
-        for older_no,older_expr in kept:
-            dep=proportional_on_shared_domain(r.after,older_expr)
-            if dep=='unsupported':
-                return {'status':'unsupported','reason':'線形従属の証明ができません。全体演算を取り消します。'}
-            if dep=='yes':
-                removed.append({'id':no,'reason':f'No.{older_no}に比例'})
-                dup=True
-                break
-        if not dup:kept.append((no,r.after))
+        dep = relation_to_span(r.after, kept)
+        if dep['status'] == 'unsupported':
+            return {'status':'unsupported','reason':'線形関係を厳密に判定できません。全体演算を取り消します。'}
+        if dep['status'] == 'yes':
+            removed.append({'id':no, 'reason':relation_reason(dep)})
+            continue
+        kept.append((no, r.after))
     return {'status':'ok','bases':[{'id':i,'expression':s} for i,s in kept],
             'removed':removed,'calculations':[{'id':n,**r.to_dict()} for n,r in results]}

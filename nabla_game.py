@@ -18,6 +18,8 @@ from nabla_math import (
     apply_card, apply_mixed_chain, apply_whole_board,
     proportional_on_shared_domain,
 )
+from nabla_linear import relation_to_span, relation_reason
+# NABLA-LINEAR-SPAN-2026-11
 
 FUNCTIONS = {
     'zero': '0', 'one': '1', 'x': 'x', 'x2': 'x**2',
@@ -126,12 +128,11 @@ def _find_basis(board, number):
 
 
 def _proportional_to_older(formula, board, except_id=None):
-    for existing in board:
-        if existing['id'] == except_id: continue
-        same = proportional_on_shared_domain(formula, existing['expression'])
-        if same == 'unsupported': return ('unsupported', None)
-        if same == 'yes': return ('yes', existing['id'])
-    return ('no', None)
+    # Test membership in the ENTIRE span, not just pairwise proportions.
+    older = [(base['id'], base['expression']) for base in board
+             if base['id'] != except_id]
+    result = relation_to_span(formula, older)
+    return (result['status'], relation_reason(result) if result['status'] == 'yes' else None)
 
 
 def _validate_indices(hand, indices):
@@ -221,7 +222,7 @@ def play(state: dict[str, Any], actor: int, action: dict[str, Any],
             if dep == 'unsupported':
                 return _noncommitted('unsupported', state, '追加基底の線形従属を証明できません。')
             if dep == 'yes':
-                event['removed'].append({'id':new_number, 'reason':f'No.{same_id}に比例'})
+                event['removed'].append({'id':new_number, 'reason':same_id})
             else:
                 new_board.append(_base(new_number, formula))
         return _complete(next_state, actor, event, selection)
@@ -308,7 +309,7 @@ def play(state: dict[str, Any], actor: int, action: dict[str, Any],
                 return _noncommitted('unsupported', state, '演算後の線形従属を証明できません。')
             if dep == 'yes':
                 new_board[:] = [b for b in new_board if b['id'] != event['basis_id']]
-                event['removed'].append({'id':event['basis_id'], 'reason':f'No.{match}に比例'})
+                event['removed'].append({'id':event['basis_id'], 'reason':match})
             else:
                 _find_basis(new_board, event['basis_id'])['expression'] = r.after
     return _complete(next_state, actor, event, selection)
