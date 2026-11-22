@@ -66,11 +66,48 @@ def _differentiation_steps(expr, after, order):
     return result
 
 
+# NABLA-EXPLAIN-PROTOTYPE-2026-11-22
+def _elementary_integration_steps(expr, after):
+    """Only add explanations verified by differentiation and answer equality."""
+    options = []
+    if expr == 0:
+        options.append(('0 の原始関数は定数です。ゲームでは積分定数を 0 とします。', sp.Integer(0)))
+    elif expr == 1:
+        options.append(('定数 1 を積分すると x です。', X))
+    elif expr == X:
+        options.append(('べき関数の積分公式を適用します。', X**2 / 2))
+    elif expr.is_Pow and expr.base == X and expr.exp.is_number and expr.exp != -1:
+        options.append(('べき関数の積分公式を適用します（指数が -1 以外）。',
+                        X**(expr.exp + 1) / (expr.exp + 1)))
+    elif expr == 1 / X:
+        options.append(('1/x の原始関数は log|x| です（x ≠ 0）。', sp.log(sp.Abs(X))))
+    elif expr == sp.sin(X):
+        options.append(('sin(x) の原始関数は -cos(x) です。', -sp.cos(X)))
+    elif expr == sp.cos(X):
+        options.append(('cos(x) の原始関数は sin(x) です。', sp.sin(X)))
+    elif expr == sp.exp(X):
+        options.append(('e^x の原始関数は e^x です。', sp.exp(X)))
+    elif expr.is_Mul:
+        constant, rest = expr.as_independent(X, as_Add=False)
+        if constant != 1 and constant.is_number:
+            try:
+                primitive = sp.integrate(rest, X)
+                if not primitive.has(sp.Integral):
+                    options.append(('定数倍を積分の外に出します。', constant * primitive))
+            except (ValueError, TypeError, NotImplementedError):
+                pass
+    steps = []
+    for label, primitive in options:
+        if _verified(sp.diff(primitive, X), expr) and _verified(primitive, after):
+            steps.append(_line(label, _eq(sp.Integral(expr, X), primitive)))
+    return steps
+
+
 def _integration_steps(expr, after):
     # Verify against the authoritative answer before explaining the primitive.
     if not _verified(sp.diff(after, X), expr):
         return [_line('原始関数の追加説明を厳密に確認できません。')]
-    steps = []
+    steps = _elementary_integration_steps(expr, after)
     if expr.is_Add:
         steps.append(_line('積分の線形性を使い、項ごとに積分します。',
                            _eq(sp.Integral(expr, X), sp.Add(*(sp.Integral(t, X) for t in expr.args)))))
