@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import sympy as sp
+from functools import lru_cache
+# NABLA-SPEED-2026-11
 from sympy.calculus.util import continuous_domain
 
 X = sp.Symbol('x', real=True)
@@ -57,6 +59,7 @@ class Result:
         return vars(self).copy()
 
 
+@lru_cache(maxsize=1024)
 def parse_formula(text: str) -> sp.Expr:
     """Safe parser for program-generated expressions, e.g. `x**2*exp(x)`.
 
@@ -113,6 +116,7 @@ def _format(expr):
     return sp.sstr(expr).replace('log(', 'log(')
 
 
+@lru_cache(maxsize=1024)
 def _domain(expr):
     try:
         d = continuous_domain(expr, X, sp.S.Reals)
@@ -450,6 +454,7 @@ def apply_mixed_chain(before_text: str, cards: list[tuple[str,str]]) -> Result:
         return Result('unsupported',str(before_text),reason='最終式を厳密に検証できません。')
 
 
+@lru_cache(maxsize=1024)
 def proportional_on_shared_domain(left_expr, right_expr) -> str:
     """'yes','no','unsupported': exact symbolic proportionality, no numeric guesses.
 

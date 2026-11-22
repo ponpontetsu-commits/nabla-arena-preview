@@ -4,6 +4,7 @@
  const esc = s => String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const gs = id => document.getElementById(id);
  const flag = 'nabla_educational_steps';
+ // NABLA-SPEED-2026-11
  let stepsOn = localStorage.getItem(flag)!=='off';
  let activePractice = false;
  let pstate = null;
@@ -194,6 +195,19 @@
  function currentAction(){return {actor:actorSeat,target_player:targetSeat,cards:chosen.slice(),
                                       ...(targetBasis?{basis_id:Number(targetBasis)}:{})};}
  function options(p){return p.bases.map(b=>`<option value="${b.id}">No.${b.id}：${esc(b.expression)}</option>`).join('')}
+ // Keep the visible selection in sync without recreating the whole page.
+ function refreshPracticeSelection(){
+    const display = root.querySelector('#practiceSelection');
+    if(display) display.textContent = chosen.length ? chosen.map(c=>DICT[c]||c).join(' → ') : '未選択';
+    root.querySelectorAll('[data-pcard]').forEach(b=>b.classList.toggle('chosen',chosen.includes(b.dataset.pcard)));
+ }
+ function refreshPracticeTargetBasis(){
+    const input = root.querySelector('#practiceBasis');
+    if(!input || !pstate) return;
+    input.innerHTML = '<option value="">場全体／追加</option>'+
+      (pstate.players[targetSeat]?.bases||[]).map(b=>`<option value="${b.id}">No.${b.id}：${esc(b.expression)}</option>`).join('');
+    input.value='';
+ }
  function renderPractice(){
    if(!activePractice||!pstate)return;
    root.classList.remove('hidden');
@@ -207,7 +221,7 @@
     <div class="practice-boards">${boards}</div>
     ${pstate.finished?`<div class="practice-end">通常対戦なら終了：${esc(pstate.end_reason||'終了')}。履歴を復元するか、基底を再設定してください。</div>`:''}
     <h3>カードを選ぶ（使用順）</h3><div class="practice-categories">${operations}</div>
-    <p>選択：<strong>${chosen.length?chosen.map(c=>esc(DICT[c]||c)).join(' → '):'未選択'}</strong> <button id="practiceClear">選択解除</button></p>
+    <p>選択：<strong id="practiceSelection">${chosen.length?chosen.map(c=>esc(DICT[c]||c)).join(' → '):'未選択'}</strong> <button id="practiceClear">選択解除</button></p>
     <div class="practice-controls"><label>操作する側<select id="practiceActor"><option value="0" ${actorSeat===0?'selected':''}>盤面A</option><option value="1" ${actorSeat===1?'selected':''}>盤面B</option></select></label>
     <label>対象の場<select id="practiceTarget"><option value="0" ${targetSeat===0?'selected':''}>盤面A</option><option value="1" ${targetSeat===1?'selected':''}>盤面B</option></select></label>
     <label>対象の基底<select id="practiceBasis"><option value="">場全体／追加</option>${basisOptions}</select></label>
@@ -224,16 +238,16 @@
      if(confirm('練習を終了しますか？\n現在の盤面と分岐履歴は消去されます。'))await practiceClose();
    });
    root.querySelectorAll('[data-pcard]').forEach(b=>b.addEventListener('click',()=>{
-     chosen.push(b.dataset.pcard);renderPractice();
+     chosen.push(b.dataset.pcard);refreshPracticeSelection();
    }));
-   root.querySelector('#practiceClear').addEventListener('click',()=>{chosen=[];renderPractice()});
-   root.querySelector('#practiceActor').addEventListener('change',e=>{actorSeat=Number(e.target.value);renderPractice()});
-   root.querySelector('#practiceTarget').addEventListener('change',e=>{targetSeat=Number(e.target.value);targetBasis=null;renderPractice()});
+   root.querySelector('#practiceClear').addEventListener('click',()=>{chosen=[];refreshPracticeSelection()});
+   root.querySelector('#practiceActor').addEventListener('change',e=>{actorSeat=Number(e.target.value)});
+   root.querySelector('#practiceTarget').addEventListener('change',e=>{targetSeat=Number(e.target.value);targetBasis=null;refreshPracticeTargetBasis()});
    root.querySelector('#practiceBasis').addEventListener('change',e=>{targetBasis=e.target.value?Number(e.target.value):null});
    root.querySelector('#practiceExecute').addEventListener('click',()=>{
      if(!chosen.length){alert('カードを選んでください。');return;}
      const action=currentAction();
-     handlePracticeOperation(()=>practiceAPI('operate',action)).then(()=>{chosen=[];renderPractice()});
+     handlePracticeOperation(()=>practiceAPI('operate',action)).then(()=>{chosen=[];refreshPracticeSelection()});
    });
    root.querySelector('#practiceEdit').addEventListener('click',()=>{
      const operation=root.querySelector('#practiceEditAction').value;

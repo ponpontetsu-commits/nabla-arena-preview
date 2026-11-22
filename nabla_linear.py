@@ -8,6 +8,8 @@ increase on an interval. Anything else remains 'unsupported'.
 from __future__ import annotations
 
 import sympy as sp
+from functools import lru_cache
+# NABLA-SPEED-2026-11
 from nabla_math import X, _domain, parse_formula, proportional_on_shared_domain, UnsupportedMath, InputError
 
 _POINT_CANDIDATES = (
@@ -75,8 +77,10 @@ def _interval_exists(domain):
     )
 
 
+@lru_cache(maxsize=512)
 def _coefficients(expr):
-    expanded = sp.expand(sp.expand_trig(expr))
+    # sin(x)^2 + cos(x)^2 = 1: use an exact identity, never an approximation.
+    expanded = sp.expand(sp.expand_trig(expr).subs(sp.cos(X)**2, 1 - sp.sin(X)**2))
     if len(str(expanded)) > 2200:
         return None
     terms = sp.Add.make_args(expanded)
@@ -243,12 +247,16 @@ def relation_to_span(candidate, older):
             }}
         if _poly_independent(target, old_exprs, _interval_exists(domain)):
             return {'status': 'no', 'coefficients': {}}
+        # A nonzero Wronskian at a valid domain point proves independence.
+        # Attempt this inexpensive exact certificate BEFORE extensive sampling.
+        if _wronskian_independent(target, old_exprs, domain):
+            return {'status': 'no', 'coefficients': {}}
         sampled, coeffs = _point_sampling(target, old_exprs, domain)
         if sampled == 'yes':
             return {'status': 'yes', 'coefficients': {
                 id_: str(c) for (id_, _), c in zip(pairs, coeffs) if c != 0
             }}
-        if sampled == 'no' or _wronskian_independent(target, old_exprs, domain):
+        if sampled == 'no':
             return {'status': 'no', 'coefficients': {}}
         return {'status': 'unsupported', 'coefficients': {}}
     except (UnsupportedMath, InputError, ValueError, TypeError, NotImplementedError, RecursionError, OverflowError, ZeroDivisionError):
@@ -264,3 +272,21 @@ def relation_reason(result):
     if coefficients:
         return '、'.join('No.' + str(k) for k in coefficients) + 'の線形結合'
     return '既存基底の線形結合'
+
+
+# Exact relation results, including valid proof coefficients, are immutable
+# across repeated CPU candidates and turns. Cache a compact immutable form.
+_relation_to_span_uncached = relation_to_span
+
+@lru_cache(maxsize=768)
+def _cached_relation_to_span(candidate, older):
+    result = _relation_to_span_uncached(candidate, older)
+    return (result['status'], tuple(result['coefficients'].items()))
+
+
+def relation_to_span(candidate, older):
+    try:
+        status, coefficients = _cached_relation_to_span(candidate, tuple(older))
+        return {'status': status, 'coefficients': dict(coefficients)}
+    except TypeError:
+        return _relation_to_span_uncached(candidate, older)
