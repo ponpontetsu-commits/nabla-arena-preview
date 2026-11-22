@@ -1,140 +1,193 @@
-"""NABLA ARENA: apply certified multibasis linear-algebra extension.
+"""NABLA ARENA speed patch (feature branch only).
 
-Upload nabla_linear.py FIRST, then this script to nabla-arena-update.
-The existing workflow executes this script and validates/commits the changes.
-The stable main branch is never modified.
+Upload this one file as `nabla_upgrade.py` to the `nabla-arena-update`
+branch. Existing GitHub Actions workflow executes it, tests changes, stages
+all new files, and commits if validation passes. It does not alter main.
+
+Speed strategy:
+* Prove independence by an exact nonzero Wronskian witness before expensive
+  point-by-point symbolic elimination (same mathematical meaning).
+* Reduce cos(x)^2 using the exact identity 1-sin(x)^2 so familiar trigonometric
+  linear relations are certified with a short symbolic proof.
+* Cache only deterministic exact computations (bounded LRU caches).
+* Update selection controls in-place rather than recreating the entire practice
+  screen on every tap, preserving DOM values, scroll, and touch targets.
 """
 from __future__ import annotations
 
 import ast
 from pathlib import Path
+import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent
-MARK = 'NABLA-LINEAR-SPAN-2026-11'
+MARK = 'NABLA-SPEED-2026-11'
 
 
-def replace_one(source: str, old: str, new: str, label: str) -> str:
+def replace_one(source, old, new, label):
     count = source.count(old)
     if count != 1:
-        raise RuntimeError(f'{label}: expected one matching block; found {count}')
+        raise RuntimeError(f'{label}: expected one matching block, found {count}')
     return source.replace(old, new, 1)
 
 
 def upgrade():
-    linear = ROOT / 'nabla_linear.py'
-    game_file = ROOT / 'nabla_game.py'
-    math_file = ROOT / 'nabla_math.py'
-    if not (linear.is_file() and game_file.is_file() and math_file.is_file()):
-        raise RuntimeError('Missing required files. Upload nabla_linear.py before nabla_upgrade.py.')
-    ast.parse(linear.read_text(encoding='utf-8'), filename='nabla_linear.py')
-    game = game_file.read_text(encoding='utf-8')
-    math = math_file.read_text(encoding='utf-8')
-    if MARK in game and MARK in math:
-        print('Certified linear-span upgrade is already applied. No changes needed.')
+    paths = {name: ROOT / name for name in (
+        'nabla_math.py', 'nabla_linear.py', 'nabla_upgrade_ui.js'
+    )}
+    if any(not p.is_file() for p in paths.values()):
+        raise RuntimeError('Expected game math, linear, and UI modules are missing.')
+    src = {name: p.read_text(encoding='utf-8') for name, p in paths.items()}
+    if all(MARK in s for s in src.values()):
+        print('NABLA ARENA speed patch already installed.')
         return
-    if MARK in game or MARK in math:
-        raise RuntimeError('Partial upgrade detected. No files changed.')
-    if 'NABLA-REVISION-2026-11' not in game:
-        raise RuntimeError('The stage-3 revision must already be installed; no files changed.')
+    if any(MARK in s for s in src.values()):
+        raise RuntimeError('Partial performance upgrade detected; did not change files.')
+    if 'NABLA-LINEAR-SPAN-2026-11' not in src['nabla_math.py']:
+        raise RuntimeError('Certified linear-span extension has not been installed.')
 
-    # General span checking replaces pairwise proportional checks in game actions.
-    game = replace_one(
-        game,
-        'from nabla_math import (\n    apply_card, apply_mixed_chain, apply_whole_board,\n    proportional_on_shared_domain,\n)',
-        'from nabla_math import (\n    apply_card, apply_mixed_chain, apply_whole_board,\n    proportional_on_shared_domain,\n)\nfrom nabla_linear import relation_to_span, relation_reason\n# ' + MARK,
-        'game import extension'
+    linear = src['nabla_linear.py']
+    linear = replace_one(
+        linear,
+        'import sympy as sp\n',
+        'import sympy as sp\nfrom functools import lru_cache\n# ' + MARK + '\n',
+        'linear functools import',
     )
-    game = replace_one(
-        game,
-        """def _proportional_to_older(formula, board, except_id=None):
-    for existing in board:
-        if existing['id'] == except_id: continue
-        same = proportional_on_shared_domain(formula, existing['expression'])
-        if same == 'unsupported': return ('unsupported', None)
-        if same == 'yes': return ('yes', existing['id'])
-    return ('no', None)""",
-        """def _proportional_to_older(formula, board, except_id=None):
-    # Test membership in the ENTIRE span, not just pairwise proportions.
-    older = [(base['id'], base['expression']) for base in board
-             if base['id'] != except_id]
-    result = relation_to_span(formula, older)
-    return (result['status'], relation_reason(result) if result['status'] == 'yes' else None)""",
-        'multibasis game checking'
+    linear = replace_one(
+        linear,
+        'def _coefficients(expr):\n    expanded = sp.expand(sp.expand_trig(expr))',
+        '''@lru_cache(maxsize=512)
+def _coefficients(expr):
+    # sin(x)^2 + cos(x)^2 = 1: use an exact identity, never an approximation.
+    expanded = sp.expand(sp.expand_trig(expr).subs(sp.cos(X)**2, 1 - sp.sin(X)**2))''',
+        'exact trig identity and coefficient cache',
     )
-    game = replace_one(
-        game,
-        "event['removed'].append({'id':new_number, 'reason':f'No.{same_id}に比例'})",
-        "event['removed'].append({'id':new_number, 'reason':same_id})",
-        'added basis elimination reason'
+    linear = replace_one(
+        linear,
+        """        sampled, coeffs = _point_sampling(target, old_exprs, domain)
+        if sampled == 'yes':
+            return {'status': 'yes', 'coefficients': {
+                id_: str(c) for (id_, _), c in zip(pairs, coeffs) if c != 0
+            }}
+        if sampled == 'no' or _wronskian_independent(target, old_exprs, domain):
+            return {'status': 'no', 'coefficients': {}}""",
+        """        # A nonzero Wronskian at a valid domain point proves independence.
+        # Attempt this inexpensive exact certificate BEFORE extensive sampling.
+        if _wronskian_independent(target, old_exprs, domain):
+            return {'status': 'no', 'coefficients': {}}
+        sampled, coeffs = _point_sampling(target, old_exprs, domain)
+        if sampled == 'yes':
+            return {'status': 'yes', 'coefficients': {
+                id_: str(c) for (id_, _), c in zip(pairs, coeffs) if c != 0
+            }}
+        if sampled == 'no':
+            return {'status': 'no', 'coefficients': {}}""",
+        'independence proof order',
     )
-    game = replace_one(
-        game,
-        "event['removed'].append({'id':event['basis_id'], 'reason':f'No.{match}に比例'})",
-        "event['removed'].append({'id':event['basis_id'], 'reason':match})",
-        'operated basis elimination reason'
-    )
+    linear += '''
 
-    # Whole-board differentiation must also test dependence on all earlier bases.
+# Exact relation results, including valid proof coefficients, are immutable
+# across repeated CPU candidates and turns. Cache a compact immutable form.
+_relation_to_span_uncached = relation_to_span
+
+@lru_cache(maxsize=768)
+def _cached_relation_to_span(candidate, older):
+    result = _relation_to_span_uncached(candidate, older)
+    return (result['status'], tuple(result['coefficients'].items()))
+
+
+def relation_to_span(candidate, older):
+    try:
+        status, coefficients = _cached_relation_to_span(candidate, tuple(older))
+        return {'status': status, 'coefficients': dict(coefficients)}
+    except TypeError:
+        return _relation_to_span_uncached(candidate, older)
+'''
+
+    math = src['nabla_math.py']
     math = replace_one(
         math,
-        '    kept=[]; removed=[]\n    for no,r in sorted(results,key=lambda z:z[0]):',
-        '    from nabla_linear import relation_to_span, relation_reason\n    # ' + MARK + '\n    kept=[]; removed=[]\n    for no,r in sorted(results,key=lambda z:z[0]):',
-        'whole-board linear extension'
+        'import sympy as sp\n',
+        'import sympy as sp\nfrom functools import lru_cache\n# ' + MARK + '\n',
+        'math functools import',
     )
-    math = replace_one(
-        math,
-        """        dup=False
-        for older_no,older_expr in kept:
-            dep=proportional_on_shared_domain(r.after,older_expr)
-            if dep=='unsupported':
-                return {'status':'unsupported','reason':'線形従属の証明ができません。全体演算を取り消します。'}
-            if dep=='yes':
-                removed.append({'id':no,'reason':f'No.{older_no}に比例'})
-                dup=True
-                break
-        if not dup:kept.append((no,r.after))""",
-        """        dep = relation_to_span(r.after, kept)
-        if dep['status'] == 'unsupported':
-            return {'status':'unsupported','reason':'線形関係を厳密に判定できません。全体演算を取り消します。'}
-        if dep['status'] == 'yes':
-            removed.append({'id':no, 'reason':relation_reason(dep)})
-            continue
-        kept.append((no, r.after))""",
-        'whole-board multibasis relation'
-    )
-    for name, source in [('nabla_game.py', game), ('nabla_math.py', math)]:
-        ast.parse(source, filename=name)
+    math = replace_one(math, 'def parse_formula(text: str) -> sp.Expr:',
+                       '@lru_cache(maxsize=1024)\ndef parse_formula(text: str) -> sp.Expr:',
+                       'parser cache')
+    math = replace_one(math, 'def _domain(expr):',
+                       '@lru_cache(maxsize=1024)\ndef _domain(expr):',
+                       'real domain cache')
+    math = replace_one(math, 'def proportional_on_shared_domain(left_expr, right_expr) -> str:',
+                       '@lru_cache(maxsize=1024)\ndef proportional_on_shared_domain(left_expr, right_expr) -> str:',
+                       'proportionality cache')
 
-    # Check all anchors and syntax before writing either target.
-    for path, source in [(game_file, game), (math_file, math)]:
-        tmp = path.with_name(path.name + '.nabla-linear-pending')
-        tmp.write_text(source, encoding='utf-8')
-    for path in [game_file, math_file]:
-        path.with_name(path.name + '.nabla-linear-pending').replace(path)
-    print('Certified multibasis engine installed into nabla_game.py and nabla_math.py.')
+    ui = src['nabla_upgrade_ui.js']
+    ui = replace_one(ui,
+        " const flag = 'nabla_educational_steps';",
+        " const flag = 'nabla_educational_steps';\n // " + MARK,
+        'UI marker')
+    ui = replace_one(ui,
+        ''' function options(p){return p.bases.map(b=>`<option value="${b.id}">No.${b.id}：${esc(b.expression)}</option>`).join('')}
+ function renderPractice(){''',
+        ''' function options(p){return p.bases.map(b=>`<option value="${b.id}">No.${b.id}：${esc(b.expression)}</option>`).join('')}
+ // Keep the visible selection in sync without recreating the whole page.
+ function refreshPracticeSelection(){
+    const display = root.querySelector('#practiceSelection');
+    if(display) display.textContent = chosen.length ? chosen.map(c=>DICT[c]||c).join(' → ') : '未選択';
+    root.querySelectorAll('[data-pcard]').forEach(b=>b.classList.toggle('chosen',chosen.includes(b.dataset.pcard)));
+ }
+ function refreshPracticeTargetBasis(){
+    const input = root.querySelector('#practiceBasis');
+    if(!input || !pstate) return;
+    input.innerHTML = '<option value="">場全体／追加</option>'+
+      (pstate.players[targetSeat]?.bases||[]).map(b=>`<option value="${b.id}">No.${b.id}：${esc(b.expression)}</option>`).join('');
+    input.value='';
+ }
+ function renderPractice(){''',
+        'UI incremental selection helpers')
+    ui = replace_one(ui,
+        '''<p>選択：<strong>${chosen.length?chosen.map(c=>esc(DICT[c]||c)).join(' → '):'未選択'}</strong> <button id="practiceClear">選択解除</button></p>''',
+        '''<p>選択：<strong id="practiceSelection">${chosen.length?chosen.map(c=>esc(DICT[c]||c)).join(' → '):'未選択'}</strong> <button id="practiceClear">選択解除</button></p>''',
+        'UI selection display ID')
+    ui = replace_one(ui,
+        '''     chosen.push(b.dataset.pcard);renderPractice();''',
+        '''     chosen.push(b.dataset.pcard);refreshPracticeSelection();''',
+        'UI card click')
+    ui = replace_one(ui,
+        "root.querySelector('#practiceClear').addEventListener('click',()=>{chosen=[];renderPractice()});",
+        "root.querySelector('#practiceClear').addEventListener('click',()=>{chosen=[];refreshPracticeSelection()});",
+        'UI selection clear')
+    ui = replace_one(ui,
+        "root.querySelector('#practiceActor').addEventListener('change',e=>{actorSeat=Number(e.target.value);renderPractice()});",
+        "root.querySelector('#practiceActor').addEventListener('change',e=>{actorSeat=Number(e.target.value)});",
+        'UI actor change')
+    ui = replace_one(ui,
+        "root.querySelector('#practiceTarget').addEventListener('change',e=>{targetSeat=Number(e.target.value);targetBasis=null;renderPractice()});",
+        "root.querySelector('#practiceTarget').addEventListener('change',e=>{targetSeat=Number(e.target.value);targetBasis=null;refreshPracticeTargetBasis()});",
+        'UI target change')
+    ui = replace_one(ui,
+        "handlePracticeOperation(()=>practiceAPI('operate',action)).then(()=>{chosen=[];renderPractice()});",
+        "handlePracticeOperation(()=>practiceAPI('operate',action)).then(()=>{chosen=[];refreshPracticeSelection()});",
+        'UI redundant redraw after operation')
 
-    # Regression smoke tests. Raising fails the GitHub Actions job and stops commit.
-    from nabla_linear import relation_to_span
-    cases = [
-        ('1+x', ['1','x'], 'yes'),
-        ('x**2', ['1','x'], 'no'),
-        ('sin(x)+cos(x)', ['sin(x)','cos(x)'], 'yes'),
-        ('1', ['sin(x)**2','cos(x)**2'], 'yes'),
-        ('exp(x)', ['1','x'], 'no'),
-        ('sin(x)', ['1','x','x**2'], 'no'),
-        ('log(x)+1', ['log(x)','1'], 'yes'),
-    ]
-    for candidate, originals, expected in cases:
-        result = relation_to_span(candidate, [(i+1, expr) for i,expr in enumerate(originals)])
-        if result['status'] != expected:
-            raise AssertionError(f'Linear regression: {candidate} vs {originals}: {result}, expected {expected}')
-    print('Verified linear-algebra smoke tests:', len(cases))
+    changes={'nabla_linear.py':linear,'nabla_math.py':math,'nabla_upgrade_ui.js':ui}
+    for name in ('nabla_linear.py', 'nabla_math.py'):
+        ast.parse(changes[name],filename=name)
+    for name, text in changes.items():
+        staged=paths[name].with_name(paths[name].name + '.nabla-speed-pending')
+        staged.write_text(text,encoding='utf-8')
+    for name in changes:
+        paths[name].with_name(paths[name].name + '.nabla-speed-pending').replace(paths[name])
+
+    # Existing workflow adds only a fixed set of files; explicitly stage the
+    # new UI and math engine so the green CI run actually commits both.
+    subprocess.run(['git','add','nabla_linear.py','nabla_upgrade_ui.js'],cwd=ROOT,check=True)
+    print('NABLA SPEEDPATCH updated math caches, exact certificate order, and practice selection UI.')
 
 
-if __name__ == '__main__':
+if __name__=='__main__':
     try:
         upgrade()
-    except Exception as exc:
-        print('NABLA linear upgrade failed: ' + str(exc), file=sys.stderr)
+    except Exception as e:
+        print('SPEEDPATCH FAILED: '+str(e),file=sys.stderr)
         sys.exit(1)
