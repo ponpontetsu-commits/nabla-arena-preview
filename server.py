@@ -12,6 +12,8 @@ import re
 import secrets
 import time
 import threading
+from functools import lru_cache
+# NABLA-PRECISION-PERFORMANCE-2026-11
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
@@ -40,6 +42,7 @@ _SESSION_RE = re.compile(r'^[A-Za-z0-9_-]{32,128}$')
 _RATE_EVENTS = {}  # create/join rate limiting; single-worker prototype
 
 
+@lru_cache(maxsize=1024)
 def _mathml(expression):
     if not isinstance(expression, str) or not expression:
         return None

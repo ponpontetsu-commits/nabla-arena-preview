@@ -5,7 +5,8 @@ from __future__ import annotations
 from copy import deepcopy
 from collections import OrderedDict
 from nabla_game import new_game, play, FUNCTIONS
-from nabla_math import proportional_on_shared_domain
+from nabla_linear import relation_to_span
+# NABLA-PRECISION-PERFORMANCE-2026-11
 
 MAX_NODES=200
 MAX_BASES=24
@@ -52,12 +53,11 @@ class Practice:
         board=game['players'][seat]['bases']
         if len(board)>=MAX_BASES:
             raise ValueError('基底数の上限を超えました。')
-        for other in board:
-            dep=proportional_on_shared_domain(expr,other['expression'])
-            if dep=='yes':
-                raise ValueError('線形従属する基底は追加できません。')
-            if dep=='unsupported':
-                raise ValueError('基底の線形独立性を厳密に確認できません。')
+        dep = relation_to_span(expr, [(b['id'], b['expression']) for b in board])
+        if dep['status'] == 'yes':
+            raise ValueError('線形従属する基底は追加できません。')
+        if dep['status'] == 'unsupported':
+            raise ValueError('基底の線形独立性を厳密に確認できません。')
         if number is None:
             number=game['players'][seat]['next_basis_id']
             game['players'][seat]['next_basis_id']=number+1

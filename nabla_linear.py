@@ -23,6 +23,12 @@ _MAX_FUNCTIONS = 12
 def _zero_proof(value):
     """True, False, or None; never infer nonzero from floating point tests."""
     try:
+        if value == 0 or getattr(value, 'is_zero', None) is True:
+            return True
+        if (getattr(value, 'is_zero', None) is False
+                or getattr(value, 'is_positive', None) is True
+                or getattr(value, 'is_negative', None) is True):
+            return False
         z = sp.simplify(value)
         if z == 0 or z.is_zero is True:
             return True
@@ -149,17 +155,61 @@ def _poly_independent(target, old_exprs, interval):
         return False
 
 
-def _at_point(expressions, point):
-    values = []
-    for expr in expressions:
-        try:
-            val = sp.simplify(expr.subs(X, point))
-            if val.has(sp.nan, sp.zoo, sp.oo, -sp.oo) or val.is_real is not True or val.is_finite is not True:
-                return None
-            values.append(val)
-        except (ValueError, TypeError, NotImplementedError, RecursionError, OverflowError):
+# NABLA-PRECISION-PERFORMANCE-2026-11
+def _polynomial_degree_witness(target, old_exprs, domain):
+    """Sufficient, exact linear-independence certificate on an open interval.
+
+    If existing functions are polynomials of degree <= d, every real constant
+    combination has derivative (d+1) identically zero. A provably nonzero
+    (d+1)st derivative of the candidate at a regular interior point proves
+    independence. Never claim dependence or use approximate thresholds here.
+    """
+    if not _interval_exists(domain):
+        return False
+    if target.has(sp.Piecewise, sp.Abs, sp.sign, sp.floor, sp.ceiling):
+        return False
+    try:
+        polys = [sp.Poly(f, X) for f in old_exprs]
+        degree = max((p.degree() for p in polys if not p.is_zero), default=-1)
+        if degree < 0 or degree > 9:
+            return False
+        derivative = sp.diff(target, X, degree + 1)
+        if derivative == 0:
+            return False
+        interior = domain.interior
+        for point in _POINT_CANDIDATES[:9]:
+            if interior.contains(point) is not sp.S.true:
+                continue
+            evaluated = _at_point((derivative,), point)
+            if evaluated and _zero_proof(evaluated[0]) is False:
+                return True
+    except (sp.PolynomialError, ValueError, TypeError,
+            NotImplementedError, RecursionError, OverflowError, AttributeError):
+        pass
+    return False
+
+
+@lru_cache(maxsize=4096)
+# NABLA-PRECISION-PERFORMANCE-2026-11
+def _exact_value_at(expr, point):
+    try:
+        val = expr.subs(X, point)
+        if val.has(sp.nan, sp.zoo, sp.oo, -sp.oo):
             return None
-    return values
+        if val.is_real is True and val.is_finite is True:
+            return val
+        val = sp.simplify(val)
+        if (val.has(sp.nan, sp.zoo, sp.oo, -sp.oo)
+                or val.is_real is not True or val.is_finite is not True):
+            return None
+        return val
+    except (ValueError, TypeError, NotImplementedError, RecursionError, OverflowError):
+        return None
+
+
+def _at_point(expressions, point):
+    values = [_exact_value_at(expr, point) for expr in expressions]
+    return None if any(val is None for val in values) else values
 
 
 def _point_sampling(target, old_exprs, domain):
@@ -233,6 +283,12 @@ def relation_to_span(candidate, older):
         if domain.is_empty is True or domain is sp.S.EmptySet:
             return {'status': 'unsupported', 'coefficients': {}}
         old_exprs = [f for _, f in pairs]
+        # Prefer certified, low-cost tests when existing bases are polynomials.
+        # General symbolic solving, sampling and Wronskian remain as fallbacks.
+        if target.is_polynomial(X) is True and _poly_independent(target, old_exprs, _interval_exists(domain)):
+            return {'status': 'no', 'coefficients': {}}
+        if _polynomial_degree_witness(target, old_exprs, domain):
+            return {'status': 'no', 'coefficients': {}}
         for id_, f in pairs:
             if proportional_on_shared_domain(target, f) == 'yes':
                 # Re-verify even the fast path, using a real constant certificate.
