@@ -384,3 +384,75 @@ def answer_mathml(before, after, used_cards):
     A blank result tells the UI to render its saved authoritative answer.
     """
     return _answer_mathml_cached(before, after, tuple(used_cards or ()))
+
+
+# NABLA-LIMIT-ANSWER-V3-2026-11-23
+# Render verified divergent-limit event data without changing the math outcome.
+def answer_infinite_limit_mathml(calc, used_cards):
+    """Only for an already committed, infinite-limit basis disappearance.
+
+    A divergent limit's authoritative after is None, so the regular answer
+    formatter cannot construct a finite equality. Recalculate ONLY the signed
+    display value and keep the committed vanished status as the prerequisite.
+    The game engine, board, and event data are not mutated here.
+    """
+    try:
+        if not isinstance(calc, dict) or calc.get('status') != 'vanished':
+            return ''
+        if calc.get('after') is not None or not isinstance(calc.get('before'), str):
+            return ''
+        if not isinstance(used_cards, (list, tuple)) or len(used_cards) != 1:
+            return ''
+        code = used_cards[0]
+        if code not in ('limit_plus_inf', 'limit_minus_inf', 'limit_zero',
+                        'limsup_plus_inf', 'liminf_plus_inf'):
+            return ''
+        if '無限大' not in str(calc.get('reason') or '') and '発散' not in str(calc.get('reason') or ''):
+            return ''
+        expr = _parse(calc['before'])
+        if sp.count_ops(expr) > 40:
+            return ''
+        if code != 'limit_zero':
+            point = -sp.oo if code == 'limit_minus_inf' else sp.oo
+            val = sp.limit(expr, X, point)
+            if code in ('limsup_plus_inf', 'liminf_plus_inf'):
+                from nabla_math import _osc_bounds
+                bounds = _osc_bounds(val)
+                if bounds is not None:
+                    val = bounds[1] if code == 'limsup_plus_inf' else bounds[0]
+            if val not in (sp.oo, -sp.oo):
+                return ''
+            return _answer_xml(_answer_parts(expr, val, code, used_cards))
+
+        from nabla_math import _approach_zero
+        can_left, can_right = _approach_zero(expr)
+        if not can_left and not can_right:
+            return ''
+        values = {}
+        if can_left:
+            values['-'] = sp.limit(expr, X, sp.S.Zero, dir='-')
+        if can_right:
+            values['+'] = sp.limit(expr, X, sp.S.Zero, dir='+')
+        if not values or any(val not in (sp.oo, -sp.oo) for val in values.values()):
+            return ''
+        if len(values) == 2 and values['-'] == values['+']:
+            # Both sides have the SAME infinite signed limit.
+            return _answer_xml(_answer_parts(expr, values['+'], code, used_cards))
+
+        # Different signed limits cannot be written as one ordinary limit.
+        # A single accessible side must also be labelled explicitly.
+        pieces = []
+        for side in ('-', '+'):
+            if side not in values:
+                continue
+            sign = '−' if side == '-' else '+'
+            zero_side = '<msup><mn>0</mn><mo>' + sign + '</mo></msup>'
+            lhs = ('<munder><mi>lim</mi><mrow><mi>x</mi><mo>→</mo>' +
+                   zero_side + '</mrow></munder>' + _answer_piece(expr))
+            if pieces:
+                pieces.append('<mspace width="1em"/>')
+            pieces.extend([lhs, '<mo>=</mo>', _answer_piece(values[side])])
+        return _answer_xml(pieces)
+    except Exception:
+        # Display-only failure must never prevent a legal match from rendering.
+        return ''
