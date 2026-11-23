@@ -91,6 +91,7 @@
  if(originalEventView){
    // eventView is a function declaration in the existing application.
    eventView=function(ev){
+    if(!ev)return originalEventView(ev);
      const visible=stepsOn?ev:{...ev,calculations:(ev.calculations||[]).map(c=>({...c,steps:[]}))};
      let out=originalEventView(visible);
      if(!stepsOn || !ev || ev.kind==='pass')return out;
