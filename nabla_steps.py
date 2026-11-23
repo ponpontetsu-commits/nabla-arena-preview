@@ -255,3 +255,132 @@ def explain_event(event):
             steps.append(_line('判定：'+str(calc['reason'])))
         result.append({'id':calc.get('id'), 'steps':steps[:20]})
     return {'event_id':event.get('id'), 'calculations':result}
+
+
+# NABLA-ANSWER-LOG-V2-2026-11-23
+# Short display-only expressions derived from committed (authoritative) outcomes.
+# Preserve explain_event() and its verified educational detail for optional viewing.
+from functools import lru_cache as _answer_lru_cache
+import html as _answer_html
+
+
+def _answer_piece(expr):
+    return _answer_html.unescape(sp.mathml(expr, printer='presentation'))
+
+
+def _answer_xml(parts):
+    # Each piece comes from SymPy's MathML printer or fixed XML tokens.
+    return ('<math xmlns="http://www.w3.org/1998/Math/MathML">'
+            '<mrow>' + ''.join(parts) + '</mrow></math>')
+
+
+def _answer_parts(expr, result, code, cards):
+    """Return MathML pieces; never determine or change the game result."""
+    m = _answer_piece
+    eq = '<mo>=</mo>'
+    if code in ('diff', 'all_diff', 'all_diff2'):
+        order = 2 if code == 'all_diff2' else 1
+        left = sp.Derivative(expr, (X, order), evaluate=False)
+        parts = [m(left)]
+        if order == 1 and expr.is_Mul and sp.count_ops(expr) <= 20:
+            # Only include a useful product-rule intermediate if exactly verified.
+            expanded = sp.expand(sp.diff(expr, X))
+            if (expanded != result and len(str(expanded)) <= 160
+                    and _verified(expanded, result)):
+                parts.extend([eq, m(expanded)])
+        return parts + [eq, m(result)]
+    if code == 'integrate':
+        parts = [m(sp.Integral(expr, X))]
+        # One or two genuine integration-by-parts equalities for nontrivial cases.
+        if expr.is_Mul and sp.count_ops(expr) <= 25:
+            remaining, accumulated = expr, sp.S.Zero
+            for _ in range(2):
+                trig = next((t for t in (sp.sin(X), sp.cos(X)) if remaining.has(t)), None)
+                if trig is None:
+                    break
+                u = sp.cancel(remaining / trig)
+                if not u.is_polynomial(X):
+                    break
+                degree = sp.degree(u, X)
+                if degree is None or not 1 <= degree <= 3:
+                    break
+                v = sp.integrate(trig, X)
+                accumulated = sp.expand(accumulated + u * v)
+                remaining = sp.expand(-sp.diff(u, X) * v)
+                partial = accumulated + sp.Integral(remaining, X)
+                if len(str(partial)) > 165 or not _verified(sp.diff(partial, X), expr):
+                    break
+                parts.extend([eq, m(partial)])
+        return parts + [eq, m(result)]
+    if code in ('mul', 'div'):
+        from nabla_game import FUNCTIONS
+        if len(cards) % 2 or not cards:
+            return [m(result)]
+        factors = []
+        raw = expr
+        for i in range(0, len(cards), 2):
+            operation, function = cards[i:i+2]
+            if operation not in ('mul', 'div') or function not in FUNCTIONS:
+                return [m(result)]
+            factor = _parse(FUNCTIONS[function])
+            if operation == 'div' and factor == 0:
+                return [m(result)]
+            raw = sp.Mul(raw, factor if operation == 'mul' else
+                         sp.Pow(factor, -1, evaluate=False), evaluate=False)
+            factors.append((operation, factor))
+        if not _verified(raw, result):
+            return [m(result)]
+        parts = [('<mfenced>' + m(expr) + '</mfenced>') if expr.is_Add else m(expr)]
+        for operation, factor in factors:
+            parts.append('<mo>×</mo>' if operation == 'mul' else '<mo>÷</mo>')
+            parts.append(m(factor))
+        return parts + [eq, m(result)]
+    if code in ('limit_zero', 'limit_plus_inf', 'limit_minus_inf',
+                'limsup_plus_inf', 'liminf_plus_inf'):
+        point = sp.S.Zero if code == 'limit_zero' else (
+            -sp.oo if code == 'limit_minus_inf' else sp.oo)
+        if code in ('limsup_plus_inf', 'liminf_plus_inf'):
+            symbol = 'limsup' if code == 'limsup_plus_inf' else 'liminf'
+            left = ('<munder><mi>' + symbol + '</mi><mrow><mi>x</mi>'
+                    '<mo>→</mo>' + m(point) + '</mrow></munder>' + m(expr))
+            return [left, eq, m(result)]
+        return [m(sp.Limit(expr, X, point)), eq, m(result)]
+    if code == 'sqrt':
+        return [m(sp.Pow(expr, sp.Rational(1, 2), evaluate=False)), eq, m(result)]
+    if code == 'log':
+        return [m(sp.log(expr, evaluate=False)), eq, m(result)]
+    if code == 'inverse':
+        # Two separate assertions (not the invalid equation f(x)=f^-1(x)).
+        return (['<mi>f</mi><mo>(</mo><mi>x</mi><mo>)</mo>', eq, m(expr),
+                 '<mspace width="1em"/>',
+                 '<msup><mi>f</mi><mrow><mo>−</mo><mn>1</mn></mrow></msup>'
+                 '<mo>(</mo><mi>x</mi><mo>)</mo>', eq, m(result)])
+    return [m(expr), '<mo>→</mo>', m(result)]
+
+
+@_answer_lru_cache(maxsize=512)
+def _answer_mathml_cached(before, after, cards):
+    try:
+        if before is None or after is None or not cards:
+            return ''
+        expr, result = _parse(before), _parse(after)
+        code = cards[0]
+        # A sequence of one-type differentiation cards yields one calculation
+        # per card; use the original derivative operator at each step.
+        if code == 'diff':
+            code = 'diff'
+        pieces = _answer_parts(expr, result, code, cards)
+        return _answer_xml(pieces)
+    except (ValueError, TypeError, AttributeError, NotImplementedError,
+            RecursionError, OverflowError, ZeroDivisionError):
+        # The UI always has the authoritative after value as its fallback.
+        return ''
+
+
+def answer_mathml(before, after, used_cards):
+    """Answer-line MathML for one confirmed calculation; display only.
+
+    No action validation, board changes, or new result adjudication occurs here.
+    A blank result tells the UI to render its saved authoritative answer.
+    """
+    return _answer_mathml_cached(before, after, tuple(used_cards or ()))

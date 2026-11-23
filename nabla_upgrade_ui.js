@@ -3,9 +3,9 @@
  'use strict';
  const esc = s => String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const gs = id => document.getElementById(id);
- const flag = 'nabla_educational_steps';
+ const flag = 'nabla_answer_extra_details_v2';
  // NABLA-SPEED-2026-11
- let stepsOn = localStorage.getItem(flag)!=='off';
+ let stepsOn = localStorage.getItem(flag)==='on';
  let activePractice = false;
  let pstate = null;
  let chosen = [];
@@ -25,7 +25,7 @@
 
  function showSettings(){
    if(typeof openModal!=='function')return;
-   openModal('設定',`<p>計算過程の表示設定</p><div class="menu-options"><button id="nablaStepToggle">途中計算：${stepsOn?'ON':'OFF'}</button></div><p>変更はこの端末のブラウザに保存します。演算結果や勝敗には影響しません。</p>`);
+   openModal('設定',`<p>計算過程の表示設定</p><div class="menu-options"><button id="nablaStepToggle">追加の詳しい解説：${stepsOn?'ON':'OFF'}</button></div><p>変更はこの端末のブラウザに保存します。演算結果や勝敗には影響しません。</p>`);
  }
  document.addEventListener('click',ev=>{
    const b=ev.target.closest('button');
@@ -241,8 +241,9 @@
    if(calcs.length){
      calcs.forEach((calc,j)=>{
        content+=`<section class="practice-calculation"><div class="practice-calc-title">${calc.id?'No.'+esc(calc.id)+'／':''}計算${j+1}</div>`;
-       if(calc.before!=null)content+=`<div class="practice-math-label">演算前</div><div class="practice-math-line">${practiceMath(calc.before,calc.before_mathml)}</div>`;
-       if(calc.after!=null)content+=`<div class="practice-math-label">演算後</div><div class="practice-math-line">${practiceMath(calc.after,calc.after_mathml)}</div>`;
+       if(calc.answer_mathml)content+=`<div class="practice-math-line nabla-answer-line">${calc.answer_mathml}</div>`;
+       else if(calc.after!=null)content+=`<div class="practice-math-line">${practiceMath(calc.after,calc.after_mathml)}</div>`;
+       else if(calc.before!=null)content+=`<div class="practice-math-line">${practiceMath(calc.before,calc.before_mathml)}</div>`;
        if(calc.reason)content+=`<div class="practice-note">判定：${esc(calc.reason)}</div>`;
        if(calc.domain_changed_note)content+=`<div class="practice-note">${esc(practicePretty(calc.domain_changed_note))}</div>`;
        content+='</section>';
@@ -334,3 +335,5 @@
    fetch('/api/practice/close',{method:'POST',headers:{'Content-Type':'application/json','X-NABLA-Local':id},body:'{}',keepalive:true}).catch(()=>{});
  });
 })();
+
+// NABLA-ANSWER-LOG-V2-2026-11-23

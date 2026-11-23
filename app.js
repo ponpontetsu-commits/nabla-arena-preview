@@ -132,9 +132,11 @@ function eventView(ev){
  if(ev.target_player===0||ev.target_player===1)html+=`<p>対象：${enc(seatName(ev.target_player))}${ev.basis_id?` の No.${ev.basis_id}`:' の場全体'}</p>`;
  for(const calc of ev.calculations||[]){
   if(calc.id)html+=`<div class="event-text">No.${calc.id} の計算</div>`;
-  if(calc.before!==undefined&&calc.before!==null)html+=`<div class="log-label">演算前</div><div class="math-line">${math(calc.before,calc.before_mathml)}</div>`;
-  for(const step of calc.steps||[]){if(step.explanation)html+=`<div class="event-text">${enc(step.explanation)}</div>`;}
-  if(calc.after!==undefined&&calc.after!==null)html+=`<div class="log-label">演算後</div><div class="math-line">${math(calc.after,calc.after_mathml)}</div>`;
+  // The server formats the committed operation as one concise equation.
+  // Do not recompute the action or repeat verbose narration in the main log.
+  if(calc.answer_mathml)html+=`<div class="math-line nabla-answer-line">${calc.answer_mathml}</div>`;
+  else if(calc.after!==undefined&&calc.after!==null)html+=`<div class="math-line">${math(calc.after,calc.after_mathml)}</div>`;
+  else if(calc.before!==undefined&&calc.before!==null)html+=`<div class="math-line">${math(calc.before,calc.before_mathml)}</div>`;
   if(calc.reason)html+=`<div class="log-explain">${enc(calc.reason)}</div>`;
   if(calc.domain_changed_note)html+=`<div class="log-explain">${enc(calc.domain_changed_note)}</div>`;
  }
@@ -417,3 +419,5 @@ if(/^\d{6}$/.test(recoverRoom||'')){
   onlineDialog(invitedRoom);
  }
 }
+
+// NABLA-ANSWER-LOG-V2-2026-11-23
