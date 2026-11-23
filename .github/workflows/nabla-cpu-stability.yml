@@ -1,0 +1,66 @@
+
+name: NABLA CPU whole-board stabilization (isolated branch)
+
+on:
+  push:
+    branches: [nabla-cpu-stability]
+    paths:
+      - 'apply_cpu_stability_v1.py'
+      - 'test_patch_installer_v1.py'
+      - 'test_cpu_stability_v1.py'
+      - 'test_cpu_ui_recovery_v1.js'
+      - 'audit_nabla_feature_wiring_v1.py'
+      - '.github/workflows/nabla-cpu-stability.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nabla-cpu-stability-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  patch-test-and-commit:
+    if: github.ref == 'refs/heads/nabla-cpu-stability'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install exact game dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Test installer safety before modifying files
+        run: python -m unittest -v test_patch_installer_v1
+      - name: Apply carefully anchored patch
+        run: python apply_cpu_stability_v1.py
+      - name: Check all Python syntax
+        run: python -m compileall -q .
+      - name: Check application JavaScript syntax
+        run: |
+          node --check app.js
+          node --check nabla_upgrade_ui.js
+          node --check test_cpu_ui_recovery_v1.js
+      - name: Audit practice mode and enhanced math feature wiring (static)
+        run: python audit_nabla_feature_wiring_v1.py
+      - name: Test CPU retry and state-resync behavior
+        run: node test_cpu_ui_recovery_v1.js
+      - name: Test real game whole-board responses
+        run: python -m unittest -v test_cpu_stability_v1
+      - name: Run all existing regressions
+        run: python -m unittest discover -v -p 'test_*.py'
+      - name: Commit verified app code (never main)
+        run: |
+          if ! git diff --quiet -- server.py app.js; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add server.py app.js
+            git commit -m 'Fix whole-board log crash and add CPU state recovery'
+            git push origin HEAD:nabla-cpu-stability
+          else
+            echo 'No changed application files'
+          fi

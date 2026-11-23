@@ -42,10 +42,17 @@ _SESSION_RE = re.compile(r'^[A-Za-z0-9_-]{32,128}$')
 _RATE_EVENTS = {}  # create/join rate limiting; single-worker prototype
 
 
-@lru_cache(maxsize=1024)
 def _mathml(expression):
+    # NABLA-CPU-WHOLEBOARD-STABILITY-V1
+    # A whole-board event's before/after are lists, not formula strings.
+    # Check the type before the cached function sees an unhashable value.
     if not isinstance(expression, str) or not expression:
         return None
+    return _mathml_cached(expression)
+
+
+@lru_cache(maxsize=1024)
+def _mathml_cached(expression):
     try:
         # Only engine-produced, whitelisted symbolic expression strings are parsed.
         value = parse_formula(expression)
