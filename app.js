@@ -77,6 +77,46 @@ async function startGame(mode='local', difficulty='medium'){
  }catch(e){alert('対戦を開始できません: '+e.message)}
  finally{$('startLocal').disabled=false;$('startCPU').disabled=false}
 }
+// NABLA-CPU-WHOLEBOARD-STABILITY-V1
+// A 500 response may arrive AFTER the server commits a CPU turn. Always sync
+// authoritative state before offering another turn; never mutate game rules.
+async function recoverCpuAfterError(error){
+ const message='CPUの操作に失敗しました：'+String(error?.message||'通信または計算エラー');
+ let latest;
+ try{
+  const response=await api('state');
+  if(!response.ok||!response.state||!model||response.state.game_id!==model.game_id){
+   throw new Error('対戦状態を確認できません。');
+  }
+  latest=response.state;
+ }catch(syncError){
+  setMessage(message+'／サーバーの状態を取得できません。','error');
+  openModal('CPU対戦：状態の再取得',
+   '<p>サーバーから現在の盤面を取得できませんでした。もう一度状態を取得できます。</p>'+
+   '<button type="button" id="nablaCpuRecoveryAction">状態を再取得</button>');
+  const retry=$('nablaCpuRecoveryAction');
+  if(retry)retry.addEventListener('click',()=>{closeModal();recoverCpuAfterError(error)});
+  return;
+ }
+ model=latest;selected=[];target=null;order=[];
+ if(model.finished){
+  renderFinished();showResult();
+  setMessage('サーバーの対戦終了状態を同期しました。');
+  return;
+ }
+ render();
+ if(model.current===0){
+  setMessage('CPUの操作結果をサーバーから再取得して同期しました。');
+  return;
+ }
+ setMessage(message+'／盤面は同期済みです。再試行できます。','error');
+ openModal('CPU対戦：操作を再試行',
+  '<p>CPUの手番はまだ終了していません。盤面はサーバーと同期済みです。再試行する場合だけボタンを押してください。</p>'+
+  '<button type="button" id="nablaCpuRecoveryAction">CPUの手番を再試行</button>');
+ const retry=$('nablaCpuRecoveryAction');
+ if(retry)retry.addEventListener('click',()=>{closeModal();runCpuTurn()});
+}
+
 async function runCpuTurn(){
  if(!isCpu()||!model||model.finished||model.current!==1)return;
  busy=true;
@@ -88,7 +128,7 @@ async function runCpuTurn(){
   model=data.state;selected=[];target=null;order=[];
   if(model.finished){renderFinished();showResult()}
   else {render();setMessage('CPUの操作を計算ログに表示しました。あなたの番です。')}
- }catch(e){setMessage('CPUの操作に失敗しました：'+e.message,'error')}
+ }catch(e){await recoverCpuAfterError(e)}
  finally{busy=false;$('cpuThinking').classList.add('hidden');if(model&&!model.finished)render()}
 }
 async function ready(){
