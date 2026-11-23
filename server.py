@@ -24,7 +24,7 @@ from nabla_math import parse_formula
 from online_rooms import OnlineRooms, Storage
 from sandbox_math import safe_play, safe_cpu_turn
 from nabla_practice import dispatch as dispatch_practice
-from nabla_steps import explain_event
+from nabla_steps import explain_event, answer_mathml, answer_infinite_limit_mathml
 # NABLA-REVISION-2026-11
 
 try:
@@ -74,6 +74,7 @@ def _view(reveal_hand=True):
         for field in ('before','after'):
             item[field+'_mathml'] = _mathml(item.get(field))
         for calc in item.get('calculations',[]):
+            calc['answer_mathml'] = (answer_mathml(calc.get('before'), calc.get('after'), item.get('used_cards')) or answer_infinite_limit_mathml(calc, item.get('used_cards')))
             for field in ('before','after'):
                 calc[field+'_mathml'] = _mathml(calc.get(field))
     for player in v['players']:
@@ -89,6 +90,7 @@ def _decorate_online_view(v):
         for field in ('before', 'after'):
             item[field+'_mathml'] = _mathml(item.get(field))
         for calc in item.get('calculations', []):
+            calc['answer_mathml'] = (answer_mathml(calc.get('before'), calc.get('after'), item.get('used_cards')) or answer_infinite_limit_mathml(calc, item.get('used_cards')))
             for field in ('before', 'after'):
                 calc[field+'_mathml'] = _mathml(calc.get(field))
     for player in v.get('players', []):
@@ -135,6 +137,7 @@ def _decorate_practice_response(payload):
             if isinstance(event.get(field), str):
                 event[field + '_mathml'] = _mathml(event[field])
         for calc in event.get('calculations', []):
+            calc['answer_mathml'] = (answer_mathml(calc.get('before'), calc.get('after'), event.get('used_cards')) or answer_infinite_limit_mathml(calc, event.get('used_cards')))
             for field in ('before', 'after'):
                 if isinstance(calc.get(field), str):
                     calc[field + '_mathml'] = _mathml(calc[field])
@@ -378,3 +381,7 @@ def main():
         httpd.serve_forever()
 
 if __name__=='__main__': main()
+
+# NABLA-ANSWER-LOG-V2-2026-11-23
+
+# NABLA-LIMIT-ANSWER-V3-2026-11-23

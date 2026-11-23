@@ -66,11 +66,48 @@ def _differentiation_steps(expr, after, order):
     return result
 
 
+# NABLA-EXPLAIN-PROTOTYPE-2026-11-22
+def _elementary_integration_steps(expr, after):
+    """Only add explanations verified by differentiation and answer equality."""
+    options = []
+    if expr == 0:
+        options.append(('0 の原始関数は定数です。ゲームでは積分定数を 0 とします。', sp.Integer(0)))
+    elif expr == 1:
+        options.append(('定数 1 を積分すると x です。', X))
+    elif expr == X:
+        options.append(('べき関数の積分公式を適用します。', X**2 / 2))
+    elif expr.is_Pow and expr.base == X and expr.exp.is_number and expr.exp != -1:
+        options.append(('べき関数の積分公式を適用します（指数が -1 以外）。',
+                        X**(expr.exp + 1) / (expr.exp + 1)))
+    elif expr == 1 / X:
+        options.append(('1/x の原始関数は log|x| です（x ≠ 0）。', sp.log(sp.Abs(X))))
+    elif expr == sp.sin(X):
+        options.append(('sin(x) の原始関数は -cos(x) です。', -sp.cos(X)))
+    elif expr == sp.cos(X):
+        options.append(('cos(x) の原始関数は sin(x) です。', sp.sin(X)))
+    elif expr == sp.exp(X):
+        options.append(('e^x の原始関数は e^x です。', sp.exp(X)))
+    elif expr.is_Mul:
+        constant, rest = expr.as_independent(X, as_Add=False)
+        if constant != 1 and constant.is_number:
+            try:
+                primitive = sp.integrate(rest, X)
+                if not primitive.has(sp.Integral):
+                    options.append(('定数倍を積分の外に出します。', constant * primitive))
+            except (ValueError, TypeError, NotImplementedError):
+                pass
+    steps = []
+    for label, primitive in options:
+        if _verified(sp.diff(primitive, X), expr) and _verified(primitive, after):
+            steps.append(_line(label, _eq(sp.Integral(expr, X), primitive)))
+    return steps
+
+
 def _integration_steps(expr, after):
     # Verify against the authoritative answer before explaining the primitive.
     if not _verified(sp.diff(after, X), expr):
         return [_line('原始関数の追加説明を厳密に確認できません。')]
-    steps = []
+    steps = _elementary_integration_steps(expr, after)
     if expr.is_Add:
         steps.append(_line('積分の線形性を使い、項ごとに積分します。',
                            _eq(sp.Integral(expr, X), sp.Add(*(sp.Integral(t, X) for t in expr.args)))))
@@ -218,3 +255,204 @@ def explain_event(event):
             steps.append(_line('判定：'+str(calc['reason'])))
         result.append({'id':calc.get('id'), 'steps':steps[:20]})
     return {'event_id':event.get('id'), 'calculations':result}
+
+
+# NABLA-ANSWER-LOG-V2-2026-11-23
+# Short display-only expressions derived from committed (authoritative) outcomes.
+# Preserve explain_event() and its verified educational detail for optional viewing.
+from functools import lru_cache as _answer_lru_cache
+import html as _answer_html
+
+
+def _answer_piece(expr):
+    return _answer_html.unescape(sp.mathml(expr, printer='presentation'))
+
+
+def _answer_xml(parts):
+    # Each piece comes from SymPy's MathML printer or fixed XML tokens.
+    return ('<math xmlns="http://www.w3.org/1998/Math/MathML">'
+            '<mrow>' + ''.join(parts) + '</mrow></math>')
+
+
+def _answer_parts(expr, result, code, cards):
+    """Return MathML pieces; never determine or change the game result."""
+    m = _answer_piece
+    eq = '<mo>=</mo>'
+    if code in ('diff', 'all_diff', 'all_diff2'):
+        order = 2 if code == 'all_diff2' else 1
+        left = sp.Derivative(expr, (X, order), evaluate=False)
+        parts = [m(left)]
+        if order == 1 and expr.is_Mul and sp.count_ops(expr) <= 20:
+            # Only include a useful product-rule intermediate if exactly verified.
+            expanded = sp.expand(sp.diff(expr, X))
+            if (expanded != result and len(str(expanded)) <= 160
+                    and _verified(expanded, result)):
+                parts.extend([eq, m(expanded)])
+        return parts + [eq, m(result)]
+    if code == 'integrate':
+        parts = [m(sp.Integral(expr, X))]
+        # One or two genuine integration-by-parts equalities for nontrivial cases.
+        if expr.is_Mul and sp.count_ops(expr) <= 25:
+            remaining, accumulated = expr, sp.S.Zero
+            for _ in range(2):
+                trig = next((t for t in (sp.sin(X), sp.cos(X)) if remaining.has(t)), None)
+                if trig is None:
+                    break
+                u = sp.cancel(remaining / trig)
+                if not u.is_polynomial(X):
+                    break
+                degree = sp.degree(u, X)
+                if degree is None or not 1 <= degree <= 3:
+                    break
+                v = sp.integrate(trig, X)
+                accumulated = sp.expand(accumulated + u * v)
+                remaining = sp.expand(-sp.diff(u, X) * v)
+                partial = accumulated + sp.Integral(remaining, X)
+                if len(str(partial)) > 165 or not _verified(sp.diff(partial, X), expr):
+                    break
+                parts.extend([eq, m(partial)])
+        return parts + [eq, m(result)]
+    if code in ('mul', 'div'):
+        from nabla_game import FUNCTIONS
+        if len(cards) % 2 or not cards:
+            return [m(result)]
+        factors = []
+        raw = expr
+        for i in range(0, len(cards), 2):
+            operation, function = cards[i:i+2]
+            if operation not in ('mul', 'div') or function not in FUNCTIONS:
+                return [m(result)]
+            factor = _parse(FUNCTIONS[function])
+            if operation == 'div' and factor == 0:
+                return [m(result)]
+            raw = sp.Mul(raw, factor if operation == 'mul' else
+                         sp.Pow(factor, -1, evaluate=False), evaluate=False)
+            factors.append((operation, factor))
+        if not _verified(raw, result):
+            return [m(result)]
+        parts = [('<mfenced>' + m(expr) + '</mfenced>') if expr.is_Add else m(expr)]
+        for operation, factor in factors:
+            parts.append('<mo>×</mo>' if operation == 'mul' else '<mo>÷</mo>')
+            parts.append(m(factor))
+        return parts + [eq, m(result)]
+    if code in ('limit_zero', 'limit_plus_inf', 'limit_minus_inf',
+                'limsup_plus_inf', 'liminf_plus_inf'):
+        point = sp.S.Zero if code == 'limit_zero' else (
+            -sp.oo if code == 'limit_minus_inf' else sp.oo)
+        if code in ('limsup_plus_inf', 'liminf_plus_inf'):
+            symbol = 'limsup' if code == 'limsup_plus_inf' else 'liminf'
+            left = ('<munder><mi>' + symbol + '</mi><mrow><mi>x</mi>'
+                    '<mo>→</mo>' + m(point) + '</mrow></munder>' + m(expr))
+            return [left, eq, m(result)]
+        return [m(sp.Limit(expr, X, point)), eq, m(result)]
+    if code == 'sqrt':
+        return [m(sp.Pow(expr, sp.Rational(1, 2), evaluate=False)), eq, m(result)]
+    if code == 'log':
+        return [m(sp.log(expr, evaluate=False)), eq, m(result)]
+    if code == 'inverse':
+        # Two separate assertions (not the invalid equation f(x)=f^-1(x)).
+        return (['<mi>f</mi><mo>(</mo><mi>x</mi><mo>)</mo>', eq, m(expr),
+                 '<mspace width="1em"/>',
+                 '<msup><mi>f</mi><mrow><mo>−</mo><mn>1</mn></mrow></msup>'
+                 '<mo>(</mo><mi>x</mi><mo>)</mo>', eq, m(result)])
+    return [m(expr), '<mo>→</mo>', m(result)]
+
+
+@_answer_lru_cache(maxsize=512)
+def _answer_mathml_cached(before, after, cards):
+    try:
+        if before is None or after is None or not cards:
+            return ''
+        expr, result = _parse(before), _parse(after)
+        code = cards[0]
+        # A sequence of one-type differentiation cards yields one calculation
+        # per card; use the original derivative operator at each step.
+        if code == 'diff':
+            code = 'diff'
+        pieces = _answer_parts(expr, result, code, cards)
+        return _answer_xml(pieces)
+    except (ValueError, TypeError, AttributeError, NotImplementedError,
+            RecursionError, OverflowError, ZeroDivisionError):
+        # The UI always has the authoritative after value as its fallback.
+        return ''
+
+
+def answer_mathml(before, after, used_cards):
+    """Answer-line MathML for one confirmed calculation; display only.
+
+    No action validation, board changes, or new result adjudication occurs here.
+    A blank result tells the UI to render its saved authoritative answer.
+    """
+    return _answer_mathml_cached(before, after, tuple(used_cards or ()))
+
+
+# NABLA-LIMIT-ANSWER-V3-2026-11-23
+# Render verified divergent-limit event data without changing the math outcome.
+def answer_infinite_limit_mathml(calc, used_cards):
+    """Only for an already committed, infinite-limit basis disappearance.
+
+    A divergent limit's authoritative after is None, so the regular answer
+    formatter cannot construct a finite equality. Recalculate ONLY the signed
+    display value and keep the committed vanished status as the prerequisite.
+    The game engine, board, and event data are not mutated here.
+    """
+    try:
+        if not isinstance(calc, dict) or calc.get('status') != 'vanished':
+            return ''
+        if calc.get('after') is not None or not isinstance(calc.get('before'), str):
+            return ''
+        if not isinstance(used_cards, (list, tuple)) or len(used_cards) != 1:
+            return ''
+        code = used_cards[0]
+        if code not in ('limit_plus_inf', 'limit_minus_inf', 'limit_zero',
+                        'limsup_plus_inf', 'liminf_plus_inf'):
+            return ''
+        if '無限大' not in str(calc.get('reason') or '') and '発散' not in str(calc.get('reason') or ''):
+            return ''
+        expr = _parse(calc['before'])
+        if sp.count_ops(expr) > 40:
+            return ''
+        if code != 'limit_zero':
+            point = -sp.oo if code == 'limit_minus_inf' else sp.oo
+            val = sp.limit(expr, X, point)
+            if code in ('limsup_plus_inf', 'liminf_plus_inf'):
+                from nabla_math import _osc_bounds
+                bounds = _osc_bounds(val)
+                if bounds is not None:
+                    val = bounds[1] if code == 'limsup_plus_inf' else bounds[0]
+            if val not in (sp.oo, -sp.oo):
+                return ''
+            return _answer_xml(_answer_parts(expr, val, code, used_cards))
+
+        from nabla_math import _approach_zero
+        can_left, can_right = _approach_zero(expr)
+        if not can_left and not can_right:
+            return ''
+        values = {}
+        if can_left:
+            values['-'] = sp.limit(expr, X, sp.S.Zero, dir='-')
+        if can_right:
+            values['+'] = sp.limit(expr, X, sp.S.Zero, dir='+')
+        if not values or any(val not in (sp.oo, -sp.oo) for val in values.values()):
+            return ''
+        if len(values) == 2 and values['-'] == values['+']:
+            # Both sides have the SAME infinite signed limit.
+            return _answer_xml(_answer_parts(expr, values['+'], code, used_cards))
+
+        # Different signed limits cannot be written as one ordinary limit.
+        # A single accessible side must also be labelled explicitly.
+        pieces = []
+        for side in ('-', '+'):
+            if side not in values:
+                continue
+            sign = '−' if side == '-' else '+'
+            zero_side = '<msup><mn>0</mn><mo>' + sign + '</mo></msup>'
+            lhs = ('<munder><mi>lim</mi><mrow><mi>x</mi><mo>→</mo>' +
+                   zero_side + '</mrow></munder>' + _answer_piece(expr))
+            if pieces:
+                pieces.append('<mspace width="1em"/>')
+            pieces.extend([lhs, '<mo>=</mo>', _answer_piece(values[side])])
+        return _answer_xml(pieces)
+    except Exception:
+        # Display-only failure must never prevent a legal match from rendering.
+        return ''
