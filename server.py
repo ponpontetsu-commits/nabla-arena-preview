@@ -12,6 +12,8 @@ import re
 import secrets
 import time
 import threading
+from functools import lru_cache
+# NABLA-PRECISION-PERFORMANCE-2026-11
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
@@ -21,6 +23,9 @@ from cpu import take_cpu_turn, DIFFICULTIES
 from nabla_math import parse_formula
 from online_rooms import OnlineRooms, Storage
 from sandbox_math import safe_play, safe_cpu_turn
+from nabla_practice import dispatch as dispatch_practice
+from nabla_steps import explain_event, answer_mathml, answer_infinite_limit_mathml
+# NABLA-REVISION-2026-11
 
 try:
     from sympy.printing.mathml import mathml
@@ -37,6 +42,7 @@ _SESSION_RE = re.compile(r'^[A-Za-z0-9_-]{32,128}$')
 _RATE_EVENTS = {}  # create/join rate limiting; single-worker prototype
 
 
+@lru_cache(maxsize=1024)
 def _mathml(expression):
     if not isinstance(expression, str) or not expression:
         return None
@@ -61,10 +67,14 @@ def _view(reveal_hand=True):
     v['mode'] = mode
     v['difficulty'] = _STATE['difficulty']
     v['human_seat'] = 0 if mode == 'cpu' else seat
+    v['deadline'] = _STATE.get('deadline')
+    v['server_now'] = time.time()
+    v['timer_seconds'] = 120
     for item in v['history']:
         for field in ('before','after'):
             item[field+'_mathml'] = _mathml(item.get(field))
         for calc in item.get('calculations',[]):
+            calc['answer_mathml'] = (answer_mathml(calc.get('before'), calc.get('after'), item.get('used_cards')) or answer_infinite_limit_mathml(calc, item.get('used_cards')))
             for field in ('before','after'):
                 calc[field+'_mathml'] = _mathml(calc.get(field))
     for player in v['players']:
@@ -80,6 +90,7 @@ def _decorate_online_view(v):
         for field in ('before', 'after'):
             item[field+'_mathml'] = _mathml(item.get(field))
         for calc in item.get('calculations', []):
+            calc['answer_mathml'] = (answer_mathml(calc.get('before'), calc.get('after'), item.get('used_cards')) or answer_infinite_limit_mathml(calc, item.get('used_cards')))
             for field in ('before', 'after'):
                 calc[field+'_mathml'] = _mathml(calc.get(field))
     for player in v.get('players', []):
@@ -97,6 +108,10 @@ def route_get(path):
         return 200, (ROOT/'index.html').read_bytes(), 'text/html; charset=utf-8'
     if path == '/app.js':
         return 200, (ROOT/'app.js').read_bytes(), 'application/javascript; charset=utf-8'
+    if path == '/nabla_upgrade_ui.js':
+        return 200, (ROOT/'nabla_upgrade_ui.js').read_bytes(), 'application/javascript; charset=utf-8'
+    if path == '/nabla_upgrade.css':
+        return 200, (ROOT/'nabla_upgrade.css').read_bytes(), 'text/css; charset=utf-8'
     if path == '/api/state':
         with _LOCK:
             return (*_http_result({'ok': True, 'state': _view()}), 'application/json; charset=utf-8')
@@ -104,6 +119,44 @@ def route_get(path):
         return (*_http_result({'ok': True, 'app': 'NABLA ARENA Stage 6 preview', 'scope': 'local and online'}), 'application/json; charset=utf-8')
     return (*_http_result({'ok': False, 'message':'ページが見つかりません。'},404), 'application/json; charset=utf-8')
 
+
+# NABLA-MATH-PRESENTATION-2026-11
+
+def _decorate_practice_response(payload):
+    """Only enrich returned copies: never change the authoritative game state."""
+    state = payload.get('state') if isinstance(payload, dict) else None
+    if not isinstance(state, dict):
+        return payload
+    for player in state.get('players', []):
+        for basis in player.get('bases', []):
+            basis['mathml'] = _mathml(basis.get('expression'))
+    # The practice screen renders only the last ten events. Do not render
+    # hundreds of old event formulas on every card operation.
+    for event in state.get('history', [])[-10:]:
+        for field in ('before', 'after'):
+            if isinstance(event.get(field), str):
+                event[field + '_mathml'] = _mathml(event[field])
+        for calc in event.get('calculations', []):
+            calc['answer_mathml'] = (answer_mathml(calc.get('before'), calc.get('after'), event.get('used_cards')) or answer_infinite_limit_mathml(calc, event.get('used_cards')))
+            for field in ('before', 'after'):
+                if isinstance(calc.get(field), str):
+                    calc[field + '_mathml'] = _mathml(calc[field])
+    return payload
+
+
+def _explain_practice(data):
+    """Compute verified educational detail only after the player requests it."""
+    room = _STATE.get('practice')
+    if room is None:
+        return {'ok': False, 'message': '練習モードが開始されていません。'}
+    node = data.get('node')
+    index = data.get('history_index')
+    if str(node) != room.current:
+        return {'ok': False, 'message': '盤面が変更されました。履歴を選び直してください。'}
+    history = room.nodes[room.current]['game'].get('history', [])
+    if type(index) is not int or not 0 <= index < len(history):
+        return {'ok': False, 'message': '計算履歴が見つかりません。'}
+    return {'ok': True, 'explanation': explain_event(history[index])}
 
 def route_post(path, data):
     global _STATE
@@ -122,15 +175,42 @@ def route_post(path, data):
                 names[1] = f'CPU（{DIFFICULTIES[difficulty]}）'
             for i,p in enumerate(state['players']): p['name'] = names[i]
             _STATE = {'game':state,'ready':mode == 'cpu',
-                      'mode':mode,'difficulty':difficulty}
+                      'mode':mode,'difficulty':difficulty,
+                      'deadline':time.time()+120 if mode=='cpu' and state['current']==0 else None}
             return _http_result({'ok':True,'state':_view()})
+        if path == '/api/practice/explain':
+            return _http_result(_explain_practice(data))
+        if path.startswith('/api/practice/'):
+            return _http_result(_decorate_practice_response(dispatch_practice(_STATE,path,data)))
+        if path == '/api/explain':
+            game=_STATE.get('game') or {}
+            ev=next((e for e in game.get('history',[]) if e.get('id')==data.get('event_id')),None)
+            if ev is None:
+                return _http_result({'ok':False,'message':'計算履歴が見つかりません。'})
+            if '_explanation' not in ev:
+                ev['_explanation']=explain_event(ev)
+            return _http_result({'ok':True,'explanation':ev['_explanation']})
         if _STATE['game'] is None:
             return _http_result({'ok':False,'message':'対戦が開始されていません。'},409)
         if path == '/api/ready':
             if _STATE['mode'] != 'local':
                 return _http_result({'ok':False,'message':'CPU対戦には手番交代画面がありません。'},409)
             _STATE['ready'] = True
+            _STATE['deadline']=time.time()+120
             return _http_result({'ok':True,'state':_view()})
+        if path == '/api/timeout':
+            state=_STATE.get('game')
+            if not state:
+                return _http_result({'ok':False,'message':'対戦がありません。'})
+            deadline=_STATE.get('deadline')
+            if deadline is None or time.time()<deadline or state['finished']:
+                return _http_result({'ok':True,'status':'unchanged','state':_view()})
+            result=play(state,state['current'],{'kind':'pass','reason':'timeout'},state['revision'])
+            if result['status']!='ok':
+                return _http_result({'ok':False,'message':'時間切れの処理に失敗しました。'})
+            _STATE['game']=result['state'];_STATE['deadline']=None
+            if _STATE['mode']=='local':_STATE['ready']=False
+            return _http_result({'ok':True,'status':'timeout','state':_view(),'event':result.get('event')})
         if path == '/api/cpu':
             if _STATE['mode'] != 'cpu':
                 return _http_result({'ok':False,'message':'CPU対戦ではありません。'},409)
@@ -138,12 +218,13 @@ def route_post(path, data):
             if state['finished'] or state['current'] != 1:
                 return _http_result({'ok':False,'message':'CPUの手番ではありません。'},409)
             revision = data.get('revision')
-            if type(revision) is not int or revision != state['revision']:
+            if data.get('game_id')!=state.get('game_id') or type(revision) is not int or revision != state['revision']:
                 return _http_result({'ok':False,'message':'盤面が更新されています。'},409)
             action, result = safe_cpu_turn(state, _STATE['difficulty'])
             if result['status'] != 'ok':
                 return _http_result({'ok':False,'message':'CPUの行動を確定できません。'},500)
             _STATE['game'] = result['state']
+            _STATE['deadline']=time.time()+120 if not _STATE['game']['finished'] and _STATE['game']['current']==0 else None
             return _http_result({'ok':True,'status':'ok','state':_view(),
                                  'event':result.get('event')})
         if path == '/api/action':
@@ -154,11 +235,20 @@ def route_post(path, data):
                 return _http_result({'ok':False,'message':'CPUの手番では操作できません。'},409)
             action = data.get('action')
             revision = data.get('revision')
-            if not isinstance(action,dict) or type(revision) is not int:
+            if data.get('game_id')!=state.get('game_id') or not isinstance(action,dict) or type(revision) is not int:
                 return _http_result({'ok':False,'message':'操作データが不正です。'},400)
+            if _STATE.get('deadline') and time.time() >= _STATE['deadline']:
+                expired=play(state,state['current'],{'kind':'pass','reason':'timeout'},state['revision'])
+                _STATE['game']=expired['state']
+                _STATE['deadline']=None
+                if _STATE['mode']=='local':
+                    _STATE['ready']=False
+                return _http_result({'ok':True,'status':'ok','message':'時間切れによりパスしました。',
+                                     'state':_view(),'event':expired.get('event')})
             result = safe_play(state,state['current'],action,revision)
             if result['status'] in ('ok','foul'):
                 _STATE['game'] = result['state']
+                _STATE['deadline']=None
                 if _STATE['mode'] == 'local':
                     _STATE['ready'] = False if not _STATE['game']['finished'] else True
             return _http_result({
@@ -245,7 +335,9 @@ class Handler(BaseHTTPRequestHandler):
                     elif path == '/api/online/join':
                         result = _ONLINE.join(code,data.get('name','プレイヤー'))
                     elif path == '/api/online/action':
-                        result = _ONLINE.action(code,token,data.get('action'),data.get('revision'))
+                        result = _ONLINE.action(code,token,data.get('action'),data.get('revision'),data.get('game_id'))
+                    elif path == '/api/online/explain':
+                        result = _ONLINE.explain(code,token,data.get('event_id'))
                     elif path == '/api/online/leave':
                         result = _ONLINE.leave(code,token)
                     elif path == '/api/online/rematch':
@@ -289,3 +381,7 @@ def main():
         httpd.serve_forever()
 
 if __name__=='__main__': main()
+
+# NABLA-ANSWER-LOG-V2-2026-11-23
+
+# NABLA-LIMIT-ANSWER-V3-2026-11-23

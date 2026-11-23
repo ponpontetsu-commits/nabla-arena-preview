@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import sympy as sp
+from functools import lru_cache
+# NABLA-SPEED-2026-11
 from sympy.calculus.util import continuous_domain
 
 X = sp.Symbol('x', real=True)
@@ -57,6 +59,7 @@ class Result:
         return vars(self).copy()
 
 
+@lru_cache(maxsize=1024)
 def parse_formula(text: str) -> sp.Expr:
     """Safe parser for program-generated expressions, e.g. `x**2*exp(x)`.
 
@@ -113,6 +116,7 @@ def _format(expr):
     return sp.sstr(expr).replace('log(', 'log(')
 
 
+@lru_cache(maxsize=1024)
 def _domain(expr):
     try:
         d = continuous_domain(expr, X, sp.S.Reals)
@@ -274,6 +278,14 @@ def available_inverse_branches(expr):
         return [('principal', sp.asin(X), sp.Interval(-sp.pi/2,sp.pi/2), '元の関数 sin(x) を [-pi/2,pi/2] に制限')]
     if expr==sp.cos(X):
         return [('principal', sp.acos(X), sp.Interval(0,sp.pi), '元の関数 cos(x) を [0,pi] に制限')]
+    if expr == sp.tan(X):
+        return [('principal',sp.atan(X),sp.Interval.open(-sp.pi/2,sp.pi/2),
+                 'tan(x) を (-pi/2,pi/2) に制限します。')]
+    if expr.func == sp.exp:
+        rate=sp.diff(expr.args[0],X)
+        if rate.is_real and rate.is_number and rate.is_zero is False and not expr.args[0].subs(X,0):
+            return [('standard',sp.log(X)/rate,sp.S.Reals,
+                     '単調な指数関数の逆を自然対数として計算します。')]
     return []
 
 
@@ -314,6 +326,16 @@ def apply_card(before_text: str, operation: str, operand: str | None = None,
             if result.has(sp.Integral):
                 # Some elementary cases require alternative integrators.
                 result = sp.integrate(expr, X)
+            if not _is_elementary(result):
+                # Fallback only after the existing algorithms did not produce
+                # an elementary primitive. The next check is exact.
+                try:
+                    from sympy.integrals.manualintegrate import manualintegrate
+                    alternative=manualintegrate(expr,X)
+                    if _is_elementary(alternative) and sp.simplify(sp.diff(alternative,X)-expr)==0:
+                        result=alternative
+                except (ValueError, TypeError, NotImplementedError, RecursionError):
+                    pass
             if not _is_elementary(result):
                 raise UnsupportedMath('積分結果が初等関数で表せると証明できません。')
             if not is_one_over_x and sp.simplify(sp.diff(result,X)-expr)!=0:
@@ -432,6 +454,7 @@ def apply_mixed_chain(before_text: str, cards: list[tuple[str,str]]) -> Result:
         return Result('unsupported',str(before_text),reason='最終式を厳密に検証できません。')
 
 
+@lru_cache(maxsize=1024)
 def proportional_on_shared_domain(left_expr, right_expr) -> str:
     """'yes','no','unsupported': exact symbolic proportionality, no numeric guesses.
 
@@ -484,6 +507,8 @@ def apply_whole_board(bases: list[tuple[int,str]], order: int) -> dict[str, Any]
     if unsupported: return {'status':'unsupported','reason':'少なくとも1基底が計算未対応。全体演算を取り消します。'}
     fouls=[r for _,r in results if r.status in ('foul','input_error')]
     if fouls: return {'status':'foul','reason':'全体演算に反則が含まれています。'}
+    from nabla_linear import relation_to_span, relation_reason
+    # NABLA-LINEAR-SPAN-2026-11
     kept=[]; removed=[]
     for no,r in sorted(results,key=lambda z:z[0]):
         if r.status=='vanished':
@@ -491,15 +516,12 @@ def apply_whole_board(bases: list[tuple[int,str]], order: int) -> dict[str, Any]
             continue
         if r.after is None:
             return {'status':'unsupported','reason':'結果が確定できません。'}
-        dup=False
-        for older_no,older_expr in kept:
-            dep=proportional_on_shared_domain(r.after,older_expr)
-            if dep=='unsupported':
-                return {'status':'unsupported','reason':'線形従属の証明ができません。全体演算を取り消します。'}
-            if dep=='yes':
-                removed.append({'id':no,'reason':f'No.{older_no}に比例'})
-                dup=True
-                break
-        if not dup:kept.append((no,r.after))
+        dep = relation_to_span(r.after, kept)
+        if dep['status'] == 'unsupported':
+            return {'status':'unsupported','reason':'線形関係を厳密に判定できません。全体演算を取り消します。'}
+        if dep['status'] == 'yes':
+            removed.append({'id':no, 'reason':relation_reason(dep)})
+            continue
+        kept.append((no, r.after))
     return {'status':'ok','bases':[{'id':i,'expression':s} for i,s in kept],
             'removed':removed,'calculations':[{'id':n,**r.to_dict()} for n,r in results]}

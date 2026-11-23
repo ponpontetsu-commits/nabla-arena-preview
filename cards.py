@@ -24,7 +24,8 @@ def build_deck(*, seed: int | None = None) -> list[str]:
 
 
 def deal_new_game(*, seed: int | None = None):
-    deck = build_deck(seed=seed)
+    from nabla_upgraderules import restrict_initial_hands
+    deck = restrict_initial_hands(build_deck(seed=seed))
     return {'hands': [deck[:7], deck[7:14]], 'deck': deck[14:]}
 
 

@@ -1,0 +1,57 @@
+/* Upgrade additive styles. Keep the original monochrome design. */
+#startPractice{margin:8px 4px;padding:12px 16px;border:1.5px solid #111;border-radius:5px;background:#fff;color:#111;cursor:pointer}
+.nabla-clock{display:block;width:100%;font-size:13px;text-align:center;font-variant-numeric:tabular-nums;white-space:normal;word-break:keep-all;padding:3px 0}
+.nabla-step{margin:8px 0;padding:8px;border-left:2px solid #888;background:#fafafa;overflow-x:auto}
+.nabla-step .nabla-math{padding-top:5px;white-space:nowrap;font-size:1.1em}
+.nabla-step math{font-size:1.15em}
+.nabla-calculating{font-size:11px;color:#555;margin:8px 0}
+.nabla-steps{border-top:1px solid #bbb;margin-top:9px;padding-top:8px}
+/* CPU thinking is an unobtrusive, nonblocking status chip. */
+.cpu-thinking:not(.hidden){position:fixed;inset:auto 12px 12px auto;z-index:20;display:block;background:transparent;pointer-events:none}
+.cpu-thinking .cpu-thinking-box{padding:9px 13px;max-width:200px;border:1px solid #333;box-shadow:0 2px 12px #0001}
+.cpu-thinking .cpu-thinking-box h2{font-size:13px;margin:3px}
+.cpu-thinking .cpu-thinking-box p{font-size:11px;margin:2px}
+.cpu-thinking .cpu-spinner{width:15px;height:15px;border-width:2px}
+.nabla-practice.hidden{display:none!important}
+.nabla-practice{position:fixed;inset:0;z-index:100;background:white;color:#171717;overflow:auto;font:14px/1.6 system-ui,-apple-system,sans-serif}
+.nabla-practice header{position:sticky;top:0;background:#fff;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #888;padding:13px 16px;z-index:2}
+.nabla-practice .practice-inner{max-width:1040px;margin:auto;padding:15px}
+.nabla-practice button,.nabla-practice select{font:inherit;padding:8px 10px;border:1px solid #999;background:#fff;color:#111;border-radius:4px}
+.nabla-practice button{cursor:pointer}
+.nabla-practice button.primary,.nabla-practice button.chosen{background:#222;color:white}
+.nabla-practice .practice-boards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.nabla-practice .practice-board{border:1px solid #222;border-radius:7px;padding:10px;min-height:90px}
+.nabla-practice h3{font-size:15px;margin:13px 0 7px}
+.nabla-practice .practice-bases{display:flex;gap:7px;flex-wrap:wrap}
+.nabla-practice .practice-bases > span{border:1px solid #bbb;padding:6px;border-radius:4px;word-break:break-all}
+.nabla-practice .practice-categories{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:8px}
+.nabla-practice fieldset{border:1px solid #ccc;border-radius:5px;display:flex;flex-wrap:wrap;gap:5px;min-width:0}
+.nabla-practice legend{font-weight:600}
+.nabla-practice .practice-controls{display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin:9px 0}
+.nabla-practice label{display:flex;flex-direction:column;gap:2px;max-width:100%}
+.nabla-practice select{max-width:220px}
+.nabla-practice .practice-end{border:1px solid #555;background:#f5f5f5;padding:10px}
+.nabla-practice .practice-log article{border-bottom:1px solid #eee;padding:6px}
+#nablaRuleFouls h3{margin-top:20px}#nablaRuleFouls p{line-height:1.7}
+@media(max-width:700px){.nabla-practice .practice-boards{grid-template-columns:1fr}.nabla-clock{font-size:12px}}
+/* Keep countdown genuinely BELOW the deck icon and card-count label. */
+.deck-area{position:relative;padding-bottom:21px}
+.deck-area .nabla-clock{position:absolute;left:0;right:0;bottom:0;line-height:1.2}
+
+/* NABLA-MATH-PRESENTATION-2026-11: textbook typesetting and readable logs */
+.nabla-practice .practice-formula{display:inline-block;max-width:100%;overflow-x:auto;vertical-align:middle;white-space:nowrap;line-height:1.6}
+.nabla-practice .practice-formula math{font-size:1.12em}
+.nabla-practice .practice-bases > span{display:inline-flex;gap:5px;align-items:center;max-width:100%;overflow-x:auto;word-break:normal}
+.nabla-practice .practice-event{padding:12px 0;border-bottom:1px solid #d5d5d5}
+.nabla-practice .practice-event-heading{font-weight:700;margin-bottom:3px}
+.nabla-practice .practice-event-target{font-size:.9em;color:#555;margin-bottom:6px}
+.nabla-practice .practice-calculation{margin:9px 0;padding:8px 10px;border-left:2px solid #aaa;background:#fafafa}
+.nabla-practice .practice-calc-title{font-weight:600}
+.nabla-practice .practice-math-label{font-size:.85em;color:#555;margin-top:6px}
+.nabla-practice .practice-math-line{overflow-x:auto;white-space:nowrap;padding:4px 0;font-size:1.06em}
+.nabla-practice .practice-math-line math{font-size:1.13em}
+.nabla-practice .practice-note{font-size:.93em;line-height:1.6;margin:6px 0;overflow-wrap:anywhere}
+.nabla-practice .practice-removed{font-size:.96em;padding:5px 0}
+.nabla-practice .practice-explanation{padding:8px 10px;margin:8px 0;border:1px solid #ddd;border-radius:4px;overflow-x:auto}
+.nabla-practice .practice-explanation .nabla-step math{font-size:1.07em}
+.nabla-practice .practice-explain-button{font-size:.9em}
